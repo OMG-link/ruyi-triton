@@ -1,0 +1,39 @@
+diff --git a/lib/Dialect/Triton/IR/Traits.cpp b/lib/Dialect/Triton/IR/Traits.cpp
+index 7ac5d310a..0b1b92ca1 100644
+--- a/lib/Dialect/Triton/IR/Traits.cpp
++++ b/lib/Dialect/Triton/IR/Traits.cpp
+@@ -96,10 +96,6 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
+         return op->emitError("Maximum allowed number of elements is ")
+                << maxTensorNumElements << ", but " << *op
+                << " has more than that";
+-      if ((numElements & (numElements - 1)) != 0)
+-        return op->emitError("Number of elements must be power-of-two, but ")
+-               << *op << " doesn't follow the rule (" << numElements << ")"
+-               << " elements";
+     }
+   }
+   for (auto opType : op->getResultTypes()) {
+@@ -111,10 +107,6 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
+         return op->emitError("Maximum allowed number of elements is ")
+                << maxTensorNumElements << ", but " << *op
+                << " has more than that";
+-      if ((numElements & (numElements - 1)) != 0)
+-        return op->emitError("Number of elements must be power-of-two, but ")
+-               << *op << " doesn't follow the rule (" << numElements << ")"
+-               << " elements";
+     }
+   }
+   return success();
+diff --git a/python/triton/_utils.py b/python/triton/_utils.py
+index d7d2455f0..1d91fc7f9 100644
+--- a/python/triton/_utils.py
++++ b/python/triton/_utils.py
+@@ -50,8 +50,6 @@ def validate_block_shape(shape: List[int]):
+     for i, d in enumerate(shape):
+         if not isinstance(d, int):
+             raise TypeError(f"Shape element {i} must have type `constexpr[int]`, got `constexpr[{type(d)}]")
+-        if not is_power_of_two(d):
+-            raise ValueError(f"Shape element {i} must be a power of 2")
+         numel *= d
+ 
+     if numel > TRITON_MAX_TENSOR_NUMEL:

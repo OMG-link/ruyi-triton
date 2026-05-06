@@ -1,0 +1,41 @@
+diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
+index 8341c2c4a..c7563f2f2 100644
+--- a/python/triton/language/semantic.py
++++ b/python/triton/language/semantic.py
+@@ -1477,10 +1477,10 @@ class TritonSemantic(Generic[TensorTy]):
+             # All combinations of supported fp8 x fp8 are permitted
+             pass
+         else:
+-            assert lhs.dtype in (tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
+-                                 tl.float64), f"Unsupported lhs dtype {lhs.dtype}"
+-            assert rhs.dtype in (tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
+-                                 tl.float64), f"Unsupported rhs dtype {rhs.dtype}"
++            assert lhs.dtype in (tl.int8, tl.uint8, tl.int16, tl.uint16, tl.int32, tl.uint32,
++                                 tl.float16, tl.bfloat16, tl.float32, tl.float64), f"Unsupported lhs dtype {lhs.dtype}"
++            assert rhs.dtype in (tl.int8, tl.uint8, tl.int16, tl.uint16, tl.int32, tl.uint32,
++                                 tl.float16, tl.bfloat16, tl.float32, tl.float64), f"Unsupported rhs dtype {rhs.dtype}"
+             assert lhs.dtype == rhs.dtype, f"Both operands must be same dtype. Got {lhs.dtype} and {rhs.dtype}"
+ 
+         if lhs.dtype.is_fp8e4b15() or rhs.dtype.is_fp8e4b15():
+@@ -1521,9 +1521,17 @@ class TritonSemantic(Generic[TensorTy]):
+             and rhs.shape[-1].value >= min_dot_size[1], \
+                 f"Input shapes should have M >= {min_dot_size[0]}, N >= {min_dot_size[1]} and K >= {min_dot_size[2]}"
+         if lhs.type.scalar.is_int():
++            if out_dtype.is_int8():
++                _0 = self.builder.get_int8(0)
++                ret_scalar_ty = tl.int8
++            elif out_dtype.is_int16():
++                _0 = self.builder.get_int16(0)
++                ret_scalar_ty = tl.int16
++            elif out_dtype.is_int32():
++                _0 = self.builder.get_int32(0)
++                ret_scalar_ty = tl.int32
++            else:
++                raise ValueError(f"Unsupported out_dtype ${out_dtype}")
+-            assert lhs.type.scalar == tl.int8, "only int8 supported!"
+-            _0 = self.builder.get_int32(0)
+-            ret_scalar_ty = tl.int32
+         elif out_dtype.is_bf16():
+             raise ValueError(
+                 "out_dtype=bfloat16 is unsupported. Please use out_dtype=float32/float16 and cast with `.to(tl.bfloat16)`"
+ 
