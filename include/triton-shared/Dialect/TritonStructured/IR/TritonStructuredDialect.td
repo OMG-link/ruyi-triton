@@ -233,8 +233,8 @@ def TTS_GetStructuredStateOp : TTS_Op<"get_structured_state", [AttrSizedResultSe
   let summary = "Placeholder for the structured pointer states computed during PtrAnalysis.";
   let description = "Used to pass the offsets and strides to scf.for op to simplify IR rewrites.";
 
-  let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_IntTensor]>:$input);
-  let results = (outs AnyTypeOf<[TT_PtrLike, TT_IntTensor]>:$structured, Variadic<Index>:$offsets, Variadic<Index>:$strides);
+  let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_Tensor]>:$input);
+  let results = (outs AnyTypeOf<[TT_PtrLike, TT_Tensor]>:$structured, Variadic<Index>:$offsets, Variadic<Index>:$strides);
 
   let builders = [
     OpBuilder<(ins "Value":$input)>,
