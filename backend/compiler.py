@@ -414,9 +414,11 @@ class CPUBackend(BaseBackend):
 
     def add_stages(self, stages, options, language):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
-        stages["ttsharedir"] = lambda src, metadata: _optimize_ttsharedir(_ttir_to_ttsharedir(src))
+        stages["ttsharedir"] = lambda src, metadata: _ttir_to_ttsharedir(src)
+        stages["ttsharedir.opt"] = lambda src, metadata: _optimize_ttsharedir(src)
         stages["vectorir"] = lambda src, metadata: _ttsharedir_to_vectorir(src)
-        stages["llir"] = lambda src, metadata: _optimize_llir(_vectorir_to_llir(src))
+        stages["llir"] = lambda src, metadata: _vectorir_to_llir(src)
+        stages["llir.opt"] = lambda src, metadata: _optimize_llir(src)
         stages["obj"] = lambda src, metadata: _llir_to_bin(src, metadata)
 
     @functools.lru_cache()
