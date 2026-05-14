@@ -59,6 +59,39 @@ def _get_sanitizer_type():
     return sanitizer_type
 
 
+def _is_qgemm_opt_enabled():
+    """Check whether QGEMM optimization passes are enabled.
+
+    Reads the TRITON_ENABLE_QGEMM_OPT environment variable.
+    This switch controls all QGEMM-related optimization passes
+    (currently: decompose-high-level-ops; more may be added in the future).
+
+    Development-phase default: ENABLED (True when env var is unset).
+    For production release, change the default to False.
+    """
+    val = os.getenv("TRITON_ENABLE_QGEMM_OPT")
+    if val is None:
+        # Development-phase default: enabled.
+        # TODO: Change to False for production release.
+        return True
+    return val.lower() in ("1", "true")
+
+
+def _build_ttsharedir_passes():
+    passes = []
+
+    if _get_sanitizer_type() != "":
+        print("Building with sanitizer support...")
+        passes.append("--add-llvm-debug-info")
+
+    if _is_qgemm_opt_enabled():
+        passes.append("--decompose-high-level-ops")
+
+    passes.append("--triton-to-linalg-experimental")
+
+    return passes
+
+
 def _ttir_to_ttsharedir(mod):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
@@ -72,17 +105,11 @@ def _ttir_to_ttsharedir(mod):
         subprocess_args = [
             triton_shared_opt_path,
             src_path,
-            "--triton-to-linalg-experimental",
+            *_build_ttsharedir_passes(),
             "--mlir-print-debuginfo",
             "-o",
             dst_path,
         ]
-
-        if _get_sanitizer_type() != "":
-            print("Building with sanitizer support...")
-
-            # has to run before the other passes as operates on the tt dialect
-            subprocess_args.insert(2, "--add-llvm-debug-info")
 
         subprocess.check_call(subprocess_args)
         _dump_ir_if_needed([dst_path])
