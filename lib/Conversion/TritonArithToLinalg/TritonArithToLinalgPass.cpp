@@ -186,8 +186,7 @@ public:
     }
 
     triton::populateTritonArithToLinalgConversionPatterns(
-        pidsToFuncArgs, addptrToLinalg, assertToCf, transposeReduceToRank0,
-        patterns);
+        pidsToFuncArgs, addptrToLinalg, assertToCf, patterns);
 
     if (pidsToFuncArgs) {
       for (auto func : getOperation().getOps<triton::FuncOp>()) {
@@ -247,10 +246,8 @@ public:
 } // namespace
 
 std::unique_ptr<OperationPass<ModuleOp>>
-triton::createTritonArithToLinalgPass(bool tensorPtrToLinalg,
-                                      bool transposeReduceToRank0) {
+triton::createTritonArithToLinalgPass(bool tensorPtrToLinalg) {
   TritonArithToLinalgOptions options;
   options.tensorPtrToLinalg = tensorPtrToLinalg;
-  options.transposeReduceToRank0 = transposeReduceToRank0;
   return std::make_unique<TritonArithToLinalgPass>(options);
 }

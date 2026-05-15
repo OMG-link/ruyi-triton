@@ -39,11 +39,9 @@ module {
 // CHECK:           %[[VAL_9:.*]] = memref.alloc() : memref<512x256xbf16>
 // CHECK:           memref.copy %[[VAL_7]], %[[VAL_9]] : memref<512x256xbf16, strided<[?, 1]>> to memref<512x256xbf16>
 // CHECK:           %[[VAL_10:.*]] = bufferization.to_tensor %[[VAL_9]] restrict writable : memref<512x256xbf16>
-// CHECK:           %[[VAL_11:.*]] = tensor.empty() : tensor<256x512xbf16>
-// CHECK:           %[[VAL_12:.*]] = linalg.transpose ins(%[[VAL_10]] : tensor<512x256xbf16>) outs(%[[VAL_11]] : tensor<256x512xbf16>) permutation = [1, 0]
 // CHECK:           %[[VAL_13:.*]] = tensor.empty() : tensor<512xbf16>
 // CHECK:           %[[VAL_14:.*]] = linalg.fill ins(%[[VAL_6]] : bf16) outs(%[[VAL_13]] : tensor<512xbf16>) -> tensor<512xbf16>
-// CHECK:           %[[VAL_15:.*]] = linalg.reduce ins(%[[VAL_12]] : tensor<256x512xbf16>) outs(%[[VAL_14]] : tensor<512xbf16>) dimensions = [0]
+// CHECK:           %[[VAL_15:.*]] = linalg.reduce ins(%[[VAL_10]] : tensor<512x256xbf16>) outs(%[[VAL_14]] : tensor<512xbf16>) dimensions = [1]
 // CHECK:             (%[[VAL_16:.*]]: bf16, %[[VAL_17:.*]]: bf16) {
 // CHECK:               %[[VAL_18:.*]] = arith.addf %[[VAL_16]], %[[VAL_17]] : bf16
 // CHECK:               linalg.yield %[[VAL_18]] : bf16

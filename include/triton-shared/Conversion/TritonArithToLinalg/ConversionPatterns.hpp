@@ -1202,14 +1202,10 @@ struct MatmulConverter : public OpConversionPattern<triton::DotOp> {
 
 struct ReduceConverter : public OpConversionPattern<triton::ReduceOp> {
 
-  ReduceConverter(MLIRContext *context, bool transposeToRank0 = true,
-                  PatternBenefit benefit = 1)
-      : OpConversionPattern(context, benefit),
-        transposeToRank0(transposeToRank0) {}
+  ReduceConverter(MLIRContext *context, PatternBenefit benefit = 1)
+      : OpConversionPattern(context, benefit) {}
 
 private:
-  bool transposeToRank0;
-
   llvm::SmallVector<Operation *> getRedOps(triton::ReduceOp redOp) const {
     auto reduceBlock = redOp.getBody();
     return llvm::map_to_vector(reduceBlock->without_terminator(),
@@ -1334,34 +1330,6 @@ private:
     auto axis = op.getAxis();
     auto rank = sourceType.getRank();
     auto isVectorReduce = (rank == 1);
-
-    // For now we are transposing reductions from Triton Shared as an
-    // optimization. This should not be the job of Triton Shared so moving
-    // forward this will be removed. Doing the transpose here lacks a wider
-    // scope of analysis that might indicate that the transpose to a given axis
-    // is not optimal.
-    if (transposeToRank0) {
-      // if it is not a vector reduce, we can transpose the source
-      // so that the reduction axis is the first dimension.
-      if (!isVectorReduce && axis != 0) {
-        SmallVector<int32_t> order;
-        order.reserve(rank);
-        order.push_back(axis);
-        for (int i = 0; i < rank; ++i) {
-          if (i != axis) {
-            order.push_back(i);
-          }
-        }
-        source = getTransposedValue(source, op.getLoc(), rewriter, order);
-        axis = 0;
-      }
-    } else {
-      // preserving old behavior until we remove the transpose entirely.
-      if (axis == rank - 1 && !isVectorReduce) {
-        source = getTransposedValue(source, op.getLoc(), rewriter);
-        axis = rank - 2;
-      }
-    }
 
     bool convertToF32Precision = requiresF32Conversion(resType, rop);
 

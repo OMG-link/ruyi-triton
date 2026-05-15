@@ -50,7 +50,7 @@ void mlir::triton::populateTritonTensorPtrConversionPatterns(
 
 void mlir::triton::populateTritonArithToLinalgConversionPatterns(
     bool pidsToFuncArgs, bool addptrToLinalg, bool assertToCf,
-    bool transposeReduceToRank0, RewritePatternSet &patterns) {
+    RewritePatternSet &patterns) {
 
   if (pidsToFuncArgs) {
     patterns.add<GetProgramIDConverter, GetNumProgramsConverter>(
@@ -97,7 +97,7 @@ void mlir::triton::populateTritonArithToLinalgConversionPatterns(
   // aren't always multiple of 2s, which are sub-optimal for certain hardwares.
   patterns.add<ArgMinConverter>(patterns.getContext());
   patterns.add<ArgMaxConverter>(patterns.getContext());
-  patterns.add<ReduceConverter>(patterns.getContext(), transposeReduceToRank0);
+  patterns.add<ReduceConverter>(patterns.getContext());
 
   // Note: the ordering here matters!
   // These patterns are added last to they will be tried last.
