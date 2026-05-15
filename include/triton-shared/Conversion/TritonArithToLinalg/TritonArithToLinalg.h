@@ -18,15 +18,13 @@ void populateTritonArithToLinalgCanonicalizationPatterns(
 void populateTritonArithToLinalgConversionPatterns(bool pidsToFuncArgs,
                                                    bool addptrToLinalg,
                                                    bool assertToCf,
-                                                   bool transposeReduceToRank0,
                                                    RewritePatternSet &patterns);
 
 // Expand the triton pointer ops operating on pointers to linalg
 void populateTritonTensorPtrConversionPatterns(RewritePatternSet &patterns);
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createTritonArithToLinalgPass(bool tensorPtrToLinalg = false,
-                              bool transposeReduceToRank0 = true);
+createTritonArithToLinalgPass(bool tensorPtrToLinalg = false);
 
 } // namespace triton
 } // namespace mlir
