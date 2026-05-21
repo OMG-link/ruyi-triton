@@ -197,21 +197,29 @@ def _ttsharedir_to_vectorir(ttsharedir: str):
         vector_path = os.path.join(tmpdir, "vector.mlir")
         Path(ttshared_path).write_text(ttsharedir)
         buddy_opt_path = _get_buddy_opt_path()
+
+        passes = []
+        if _is_qgemm_opt_enabled():
+            passes.append("--qgemm-tiling=tile-m=32 tile-n=32")
+        passes.extend([
+            # Note: eliminate-empty-tensors fails when there are multiple func.return ops
+            # in a single kernel which are the results of early returns.
+            # See python/examples/test_early_return.py for examples.
+            # We disable this pass for now since performance on CPU isn't the main
+            # focus at the moment.
+            # "--eliminate-empty-tensors",
+            "--empty-tensor-to-alloc-tensor",
+            "--one-shot-bufferize=allow-return-allocs-from-loops=true",
+            "--lower-linalg-to-vir",
+            "--lower-vir-to-vector=vector-width=4",
+            "--convert-linalg-to-affine-loops",
+        ])
+
         subprocess.check_call(
             [
                 buddy_opt_path,
                 ttshared_path,
-                # Note: eliminate-empty-tensors fails when there are multiple func.return ops
-                # in a single kernel which are the results of early returns.
-                # See python/examples/test_early_return.py for examples.
-                # We disable this pass for now since performance on CPU isn't the main
-                # focus at the moment.
-                # "--eliminate-empty-tensors",
-                "--empty-tensor-to-alloc-tensor",
-                "--one-shot-bufferize=allow-return-allocs-from-loops=true",
-                "--lower-linalg-to-vir",
-                "--lower-vir-to-vector=vector-width=4",
-                "--convert-linalg-to-affine-loops",
+                *passes,
                 "--mlir-print-debuginfo",
                 "-o",
                 vector_path,
