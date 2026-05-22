@@ -201,6 +201,7 @@ def _ttsharedir_to_vectorir(ttsharedir: str):
         passes = []
         if _is_qgemm_opt_enabled():
             passes.append("--qgemm-tiling=tile-m=32 tile-n=32")
+            passes.append("--qgemm-tiling=tile-m=4 tile-n=4")
         passes.extend([
             # Note: eliminate-empty-tensors fails when there are multiple func.return ops
             # in a single kernel which are the results of early returns.

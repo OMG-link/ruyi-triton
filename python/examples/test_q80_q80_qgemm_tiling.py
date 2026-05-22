@@ -1,10 +1,10 @@
 """Integration test for Q8_0 × Q8_0 QGEMM with TRITON_ENABLE_QGEMM_OPT=1.
 
-Verifies that the QGEMM tiling optimization pass produces numerically correct
-results by comparing Triton kernel output against a PyTorch reference
+Verifies that the QGEMM multi-level tiling optimization produces numerically
+correct results by comparing Triton kernel output against a PyTorch reference
 implementation. The test exercises the full compilation pipeline including:
   - decompose-high-level-ops (TTIR → Linalg)
-  - qgemm-tiling (Linalg tiling with tile-m=32 tile-n=32)
+  - qgemm-tiling (two levels: tile-m=32 tile-n=32 then tile-m=4 tile-n=4)
   - lower-linalg-to-vir → lower-vir-to-vector → ... → native .o
 """
 
@@ -145,13 +145,16 @@ def q80_q80_canonicalized(
 # ---------------------------------------------------------------------------
 
 # Test parameters: (M, N, K, T)
-# - M=64, N=32 exercises the tiling pass (tile-m=32 tiles M=64 into 2 tiles)
-# - Additional cases verify different shapes
+# Shapes exercise multi-level tiling (tile-m=32 tile-n=32 → tile-m=4 tile-n=4)
 _TEST_CASES = [
-    (64, 32, 64, 1),   # M > tile-m=32, N <= tile-n=32 → only M is tiled
-    (64, 64, 64, 2),   # M > tile-m, N > tile-n → both M and N are tiled
-    (32, 32, 32, 1),   # M <= tile-m, N <= tile-n → no tiling applied
-    (64, 96, 64, 3),   # Larger N with multiple programs
+    (64, 32, 64, 1),    # Outer: M tiled (64→32), N not tiled (32==32)
+                         # Inner: M tiled (32→4), N tiled (32→4)
+    (64, 64, 64, 2),    # Outer: M tiled (64→32), N tiled (64→32)
+                         # Inner: M tiled (32→4), N tiled (32→4)
+    (128, 64, 64, 2),   # Larger: M tiled (128→32), N tiled (64→32)
+                         # Inner: M tiled (32→4), N tiled (32→4)
+    (32, 32, 32, 1),    # M <= tile-m, N <= tile-n → no tiling applied
+    (64, 96, 64, 3),    # Larger N with multiple programs
 ]
 
 
