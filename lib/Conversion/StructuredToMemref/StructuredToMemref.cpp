@@ -2236,6 +2236,113 @@ private:
   LogicalResult rewriteGather(tts::MakeGatherScatterTensorPtrOp ptr,
                               tts::LoadOp op, Value memRefPtr,
                               ConversionPatternRewriter &rewriter) const {
+    if (!op.hasMask() && !ptr.getGatherScatterMask()) {
+      auto loc = op.getLoc();
+      auto resultType = cast<RankedTensorType>(op.getResult().getType());
+      int64_t rank = resultType.getRank();
+      int gatherDim = ptr.getGatherScatterDim();
+
+      // Flatten the unranked base memref so every gather dimension uses the
+      // same linear-index calculation.
+      Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+      Value sourceLength = rewriter.create<memref::DimOp>(loc, memRefPtr, c0);
+      auto sourceMemrefType =
+          MemRefType::get({ShapedType::kDynamic}, resultType.getElementType());
+      SmallVector<OpFoldResult> sourceSizes{sourceLength};
+      SmallVector<OpFoldResult> sourceStrides{rewriter.getIndexAttr(1)};
+      Value sourceMemref = rewriter.create<memref::ReinterpretCastOp>(
+          loc, sourceMemrefType, memRefPtr, rewriter.getIndexAttr(0),
+          sourceSizes, sourceStrides);
+      auto sourceTensorType = RankedTensorType::get(
+          {ShapedType::kDynamic}, resultType.getElementType());
+      Value sourceTensor = rewriter.create<bufferization::ToTensorOp>(
+          loc, sourceTensorType, sourceMemref, true /*restrict*/,
+          false /*writable*/);
+
+      Value gatherOffset = ptr.getGatherScatterOffset();
+
+      auto mixedStrides = getMixedStridesForMemref(ptr, rewriter);
+      SmallVector<Value> strideValues;
+      strideValues.reserve(mixedStrides.size());
+      for (OpFoldResult stride : mixedStrides) {
+        if (auto value = dyn_cast_if_present<Value>(stride)) {
+          strideValues.push_back(value);
+          continue;
+        }
+        auto strideInt = getIntAttr(stride);
+        assert(strideInt && "expected an integer stride");
+        strideValues.push_back(
+            rewriter.create<arith::ConstantIndexOp>(loc, strideInt.value()));
+      }
+
+      // The gather dimension's offset comes entirely from the gatherOffset
+      // tensor, read element-wise in the body below, so the pointer's own
+      // offset for that dimension is superseded -- the masked path below does
+      // the same thing by overwriting offsets[gatherDim].  Zero it here so the
+      // base offset accumulates only the remaining dimensions, which
+      // accumulateTargetOffset expects to already have their stride folded in
+      // by PtrAnalysis.
+      auto baseOffsets = ptr.getMixedOffsets();
+      baseOffsets[gatherDim] = rewriter.getIndexAttr(0);
+      auto baseOffset = accumulateTargetOffset(loc, baseOffsets, mixedStrides,
+                                               gatherDim, rewriter);
+      Value baseOffsetValue;
+      if (auto value = dyn_cast_if_present<Value>(baseOffset)) {
+        baseOffsetValue = value;
+      } else {
+        auto baseOffsetInt = getIntAttr(baseOffset);
+        assert(baseOffsetInt && "expected an integer base offset");
+        baseOffsetValue =
+            rewriter.create<arith::ConstantIndexOp>(loc, baseOffsetInt.value());
+      }
+
+      SmallVector<Value> dynamicResultDims;
+      for (auto [dim, size] :
+           llvm::zip(resultType.getShape(), ptr.getSizes())) {
+        if (ShapedType::isDynamic(dim))
+          dynamicResultDims.push_back(
+              rewriter.create<arith::ConstantIndexOp>(loc, size));
+      }
+      Value empty = rewriter.create<tensor::EmptyOp>(
+          loc, resultType.getShape(), resultType.getElementType(),
+          dynamicResultDims);
+
+      SmallVector<AffineExpr> gatherExprs = {
+          getAffineDimExpr(gatherDim, rewriter.getContext())};
+      SmallVector<AffineMap> indexingMaps{
+          AffineMap::get(rank, 0, gatherExprs, rewriter.getContext()),
+          rewriter.getMultiDimIdentityMap(rank)};
+      SmallVector<utils::IteratorType> iteratorTypes(
+          rank, utils::IteratorType::parallel);
+
+      auto genericOp = rewriter.create<linalg::GenericOp>(
+          loc, TypeRange{resultType}, ValueRange{gatherOffset},
+          ValueRange{empty}, indexingMaps, iteratorTypes,
+          [&](OpBuilder &b, Location bodyLoc, ValueRange args) {
+            Value linearIndex = baseOffsetValue;
+            for (int64_t dim = 0; dim < rank; ++dim) {
+              Value index;
+              if (dim == gatherDim) {
+                index = args.front();
+                if (!index.getType().isIndex())
+                  index = b.create<arith::IndexCastOp>(bodyLoc,
+                                                       b.getIndexType(), index);
+              } else {
+                index = b.create<linalg::IndexOp>(bodyLoc, dim);
+              }
+              Value term =
+                  b.create<arith::MulIOp>(bodyLoc, index, strideValues[dim]);
+              linearIndex = b.create<arith::AddIOp>(bodyLoc, linearIndex, term);
+            }
+            Value value = b.create<tensor::ExtractOp>(bodyLoc, sourceTensor,
+                                                      ValueRange{linearIndex});
+            b.create<linalg::YieldOp>(bodyLoc, value);
+          });
+
+      rewriter.replaceOp(op, genericOp.getResult(0));
+      return success();
+    }
+
     auto loc = op.getLoc();
 
     Value gatherOffset = ptr.getGatherScatterOffset();
