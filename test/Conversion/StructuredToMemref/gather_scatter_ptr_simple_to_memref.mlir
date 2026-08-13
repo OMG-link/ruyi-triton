@@ -1,36 +1,29 @@
 // RUN: triton-shared-opt  --structured-to-memref --canonicalize --cse %s | FileCheck %s
 
+// CHECK: #[[$GATHER_MAP:.+]] = affine_map<(d0, d1) -> (d0)>
+// CHECK: #[[$OUTPUT_MAP:.+]] = affine_map<(d0, d1) -> (d0, d1)>
+
 // CHECK-LABEL:   tt.func public @row_gather(
 // CHECK-SAME:                               %[[VAL_0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>,
 // CHECK-SAME:                               %[[VAL_1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<i32>,
 // CHECK-SAME:                               %[[VAL_2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>) attributes {noinline = false} {
-// CHECK:           %[[VAL_3:.*]] = arith.constant 1 : index
-// CHECK:           %[[VAL_4:.*]] = arith.constant 0 : index
-// CHECK:           %[[VAL_5:.*]] = arith.constant dense<5> : tensor<8xi32>
-// CHECK:           %[[VAL_6:.*]] = arith.constant dense<3> : tensor<8xi32>
-// CHECK:           %[[VAL_7:.*]] = arith.constant 8 : index
-// CHECK:           %[[VAL_8:.*]] = arith.constant dense<8> : tensor<8xi32>
-// CHECK:           %[[VAL_9:.*]] = builtin.unrealized_conversion_cast %[[VAL_2]] : !tt.ptr<f32> to memref<*xf32>
-// CHECK:           %[[VAL_10:.*]] = builtin.unrealized_conversion_cast %[[VAL_0]] : !tt.ptr<f32> to memref<*xf32>
-// CHECK:           %[[VAL_11:.*]] = builtin.unrealized_conversion_cast %[[VAL_1]] : !tt.ptr<i32> to memref<*xi32>
-// CHECK:           %[[VAL_12:.*]] = memref.reinterpret_cast %[[VAL_11]] to offset: [0], sizes: [8], strides: [1] : memref<*xi32> to memref<8xi32, strided<[1]>>
-// CHECK:           %[[VAL_13:.*]] = memref.alloc() : memref<8xi32>
-// CHECK:           memref.copy %[[VAL_12]], %[[VAL_13]] : memref<8xi32, strided<[1]>> to memref<8xi32>
-// CHECK:           %[[VAL_14:.*]] = bufferization.to_tensor %[[VAL_13]] restrict writable : memref<8xi32> to tensor<8xi32>
-// CHECK:           %[[VAL_15:.*]] = arith.muli %[[VAL_14]], %[[VAL_6]] : tensor<8xi32>
-// CHECK:           %[[VAL_16:.*]] = arith.remsi %[[VAL_15]], %[[VAL_5]] : tensor<8xi32>
-// CHECK:           %[[VAL_17:.*]] = arith.muli %[[VAL_16]], %[[VAL_8]] : tensor<8xi32>
-// CHECK:           %[[VAL_18:.*]] = memref.alloc() : memref<8x8xf32>
-// CHECK:           scf.for %[[VAL_19:.*]] = %[[VAL_4]] to %[[VAL_7]] step %[[VAL_3]] {
-// CHECK:             %[[VAL_20:.*]] = tensor.extract %[[VAL_17]]{{\[}}%[[VAL_19]]] : tensor<8xi32>
-// CHECK:             %[[VAL_21:.*]] = arith.index_cast %[[VAL_20]] : i32 to index
-// CHECK:             %[[VAL_22:.*]] = memref.reinterpret_cast %[[VAL_10]] to offset: {{\[}}%[[VAL_21]]], sizes: [1, 8], strides: [1, 1] : memref<*xf32> to memref<1x8xf32, strided<[1, 1], offset: ?>>
-// CHECK:             %[[VAL_23:.*]] = memref.subview %[[VAL_18]]{{\[}}%[[VAL_19]], 0] [1, 8] [1, 1] : memref<8x8xf32> to memref<1x8xf32, strided<[8, 1], offset: ?>>
-// CHECK:             memref.copy %[[VAL_22]], %[[VAL_23]] : memref<1x8xf32, strided<[1, 1], offset: ?>> to memref<1x8xf32, strided<[8, 1], offset: ?>>
-// CHECK:           }
-// CHECK:           %[[VAL_24:.*]] = bufferization.to_tensor %[[VAL_18]] restrict writable : memref<8x8xf32> to tensor<8x8xf32>
-// CHECK:           %[[VAL_25:.*]] = memref.reinterpret_cast %[[VAL_9]] to offset: [0], sizes: [8, 8], strides: [8, 1] : memref<*xf32> to memref<8x8xf32, strided<[8, 1]>>
-// CHECK:           bufferization.materialize_in_destination %[[VAL_24]] in writable %[[VAL_25]] : (tensor<8x8xf32>, memref<8x8xf32, strided<[8, 1]>>) -> ()
+// CHECK:           %[[BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_0]] : !tt.ptr<f32> to memref<*xf32>
+// CHECK:           %[[INDEX_BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_1]] : !tt.ptr<i32> to memref<*xi32>
+// CHECK:           %[[SOURCE_LENGTH:.*]] = memref.dim %[[BASE]], %{{.*}} : memref<*xf32>
+// CHECK:           %[[SOURCE_MEMREF:.*]] = memref.reinterpret_cast %[[BASE]] to offset: [0], sizes: [%[[SOURCE_LENGTH]]], strides: [1] : memref<*xf32> to memref<?xf32>
+// CHECK:           %[[SOURCE_TENSOR:.*]] = bufferization.to_tensor %[[SOURCE_MEMREF]] restrict : memref<?xf32> to tensor<?xf32>
+// CHECK:           %[[EMPTY:.*]] = tensor.empty() : tensor<8x8xf32>
+// CHECK:           %[[RESULT:.*]] = linalg.generic {indexing_maps = [#[[$GATHER_MAP]], #[[$OUTPUT_MAP]]], iterator_types = ["parallel", "parallel"]} ins(%{{.*}} : tensor<8xi32>) outs(%[[EMPTY]] : tensor<8x8xf32>) {
+// CHECK:             ^bb0(%[[GATHER_INDEX:.*]]: i32, %{{.*}}: f32):
+// CHECK:               %[[GATHER_INDEX_INDEX:.*]] = arith.index_cast %[[GATHER_INDEX]] : i32 to index
+// CHECK:               %{{.*}} = linalg.index 1 : index
+// CHECK:               %{{.*}} = arith.addi %[[GATHER_INDEX_INDEX]], %{{.*}} : index
+// CHECK:               %{{.*}} = tensor.extract %[[SOURCE_TENSOR]][%{{.*}}] : tensor<?xf32>
+// CHECK:               linalg.yield %{{.*}} : f32
+// CHECK:           } -> tensor<8x8xf32>
+// CHECK:           %[[DEST:.*]] = builtin.unrealized_conversion_cast %[[VAL_2]] : !tt.ptr<f32> to memref<*xf32>
+// CHECK:           %[[DEST_MEMREF:.*]] = memref.reinterpret_cast %[[DEST]] to offset: [0], sizes: [8, 8], strides: [8, 1] : memref<*xf32> to memref<8x8xf32, strided<[8, 1]>>
+// CHECK:           bufferization.materialize_in_destination %[[RESULT]] in writable %[[DEST_MEMREF]] : (tensor<8x8xf32>, memref<8x8xf32, strided<[8, 1]>>) -> ()
 
 
 module {
