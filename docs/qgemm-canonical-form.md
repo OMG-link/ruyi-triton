@@ -136,15 +136,22 @@ These positions do not impose bit-width relationships or require a floating-poin
 
 ## 6. Decompression Region
 
-The decompression region is the computation that turns stored codes into the integer values entering the matrix multiplication. It may contain element-wise arithmetic, bit manipulation, table lookup, and dimension transformations, but it contains no reduction. Its boundary is found by walking upstream from the integer operand entering step 2 to the loads of kernel pointer arguments.
+The decompression region is the computation that turns stored components into the integer values entering the matrix multiplication. Its boundary is found by walking upstream from that integer operand to the loads of kernel pointer arguments. A region may contain element-wise arithmetic, bit manipulation, table lookup, and static dimension transformations, but it contains no reduction and no reduction iterator. A side already stored as the integer value used by step 2 has a degenerate region consisting only of its load and any required conversion.
 
-A quantized tensor enters a Triton kernel as a set of planar component tensors because Triton has no structure type. For example, Q4_K weight components include `q`, `d`, `dmin`, and `sc`, each supplied by a separate pointer, so a decompression region may have several sources. A codebook lookup is expressed as an indirect `tl.load` with the codebook table as an additional input to the region, and the index computation remains part of the path from the decoded value to its source components.
+The four reference formats establish the following writing checklist:
 
-Dimension transformations may express the format's stored element order. `tl.cat` permits the joined elements to be reordered, whereas `tl.join` preserves their order; the kernel author chooses between them according to the format's required semantics. A side that is already stored as the integer value used by step 2 has a degenerate region consisting only of its load and any desired conversion. Decompression comes first, and the layout convention of section 7 governs what it produces rather than what it reads: a component that has to be decoded is loaded and reshaped in whatever way its stored form makes convenient, and neither that load nor the shape transformations on the way to the decoded value have to declare a recoverable layout, because the stored form is fixed by the quantization format rather than chosen by the user, and the weight-side layout the compiler needs is the one dynamic pre-decompression writes. What the region owes is the shape of its output: `w: (n, k)` on the weight side, and `(m, G_j)` or `(n, G_j)` for a level `j` factor that factor-side decoding derives.
+| Format or component | Operations actually used | Required result |
+|---------------------|--------------------------|-----------------|
+| Q8_0 integer values | `tl.make_block_ptr`, `tl.load`, optional type conversion | direct `(m, k)` or `(n, k)` integer operand |
+| Q4_0 weight values | static `tl.reshape`, bitwise `&` and `>>`, integer conversion and subtraction of 8, order-preserving `tl.join`, `tl.trans`, and a final `tl.reshape` | `(n, k)` values in the GGML within-block order |
+| Q4_K weight values | static shape view, nibble masks and shifts, order-preserving `tl.join`, `tl.trans`, and `tl.reshape` | `(n, k)` values whose two nibbles use their proper adjacent sub-blocks |
+| Q4_K factors | three fixed-offset `tl.make_block_ptr` loads, masks, shifts, integer bitwise operations, `tl.join`, `tl.trans`, and `tl.reshape` | `sc` and `m` with shape `(n, G_1)` |
+| iq2_xxs weight values | static `tl.reshape`, `tl.trans`, `tl.split`, bit-field shifts and masks, pointer-tensor `tl.load` for the grid and sign table, `tl.where`, and static shape transformations | signed `(n, k)` codebook-decoded values |
+| iq2_xxs factors | extraction of the high four bits of `aux32[1]`, broadcast of `d`, and `f32` multiply/add by the constants in `d * (0.5 + s) * 0.25` | level-1 factor with shape `(n, G_1)` |
 
-Factor-side decoding is the same kind of computation on the factor side: it turns stored factor components into a level's factor tensor. Q4_K packs its 6-bit `sc` and `m` into bytes that have to be unpacked, and iq2_xxs derives its sub-block factor through a computation of the `(0.5 + s) * 0.25` kind. Both belong to the data preparation stage, sit upstream of the element-wise multiply alongside the weight decompression region, and their boundary is found the same way: walk upstream from the factor operand along the data flow to the loads of kernel pointer arguments.
+These operations are subject to six writing constraints. First, every shape transformation in a format decoder uses compile-time extents; a factor or value decoder may expose the physical format dimensions, but it must return the logical shape required by the next canonical step. Second, the physical pairing semantics are explicit: Q4_0 keeps both nibbles in one 32-value block, while Q4_K assigns them to adjacent 32-value sub-blocks. Third, the IQ2 codebook and sign accesses use pointer-tensor `tl.load`; `tl.gather` is not part of this writing convention. Fourth, lookup-index arithmetic remains in the region, and the fixed tables are additional read-only inputs rather than separate quantized components. Fifth, no region contains `tl.sum`, a reduction, or an operation whose reduction dimension crosses the region boundary. Sixth, a factor-side result has no `r_j` dimension: it is indexed by the remaining `(m, n, G_j)` coordinates and is therefore invariant along the dimension reduced at level `j`.
 
-That attribution does not disturb factor invariance. Level `j` factor-side decoding produces the level's factor shape, `(m, G_j)` on the activation side or `(n, G_j)` on the weight side, and that shape does not contain `r_j`, the dimension reduced at level `j`; the decoding itself contains no reduction. Invariance therefore depends only on the factor's shape, never on the computation that produced it, however long the decoding chain runs.
+Triton represents a quantized tensor as planar components. Q4_K therefore has separate `q`, `d`, `dmin`, and packed `scales` inputs, whereas iq2_xxs has exactly two weight components, `d` and `qs`; its codebook, sign table, and mask table are fixed format tables, not independent weight components. The index computation that reaches a table lookup remains part of the path from `qs` to the decoded value. Factor-side decoding follows the same boundary rule as weight decoding: walk upstream from the factor operand to its pointer loads. Q4_K unpacks the packed 6-bit factors, and iq2_xxs derives its sub-block factor from the scale code in `qs`. Neither operation contains a reduction, so factor invariance depends on the resulting shape and indexing map, not on the length of the decoding chain.
 
 ## 7. Layout Expression Chains
 
@@ -298,32 +305,33 @@ def q80_q80_strict(
 
 ## 11. Per-Format Difference Notes
 
-The table instantiates the invariant of section 2 for the four target formats; the notes after it list only what differs from the verified Q8_0 × Q8_0 example of section 10. Runnable canonical-form kernels belong to WP A2 and will live under `benchmark/kernels/`; the iq2_xxs row is a plan rather than a result, and is marked as such because that format is not compiled and not numerically verified yet.
+The four rows below are the reference formats actually compiled, numerically checked, and captured in section 12. Each row instantiates the invariant of section 2; the notes list only what differs from the verified Q8_0 × Q8_0 example of section 10.
 
 | Format | Paths and leaves | Levels: block size, factors, side | Merge |
 |--------|------------------|-----------------------------------|-------|
 | Q8_0 × Q8_0 | one path; leaves `a_q`, `w_q` | `L = 1`, `QK_1 = 32`; activation `a_d` and weight `w_d` | none |
 | Q4_0 × Q8_0 | one path; leaves `a_q`, decoded `w_q` | `L = 1`, `QK_1 = 32`; activation `a_d` and weight `w_d` | none |
-| Q4_K × Q8_K | two paths; main leaves `a_q`, `w_q`; zero-point leaf `a_q` | `{32, 256}`; level 1 weight `sc` on the main path, weight `m` on the zero-point path; level 2 weight `d` with activation `a_d` on the main path, weight `dmin` with activation `a_d` on the zero-point path | level 2, minus |
-| iq2_xxs × Q8_K, not compiled, not numerically verified | one path; leaves `a_q`, codebook-decoded `w_q` | `{32, 256}`; level 1 the sub-block factor decoded on the weight side from `w_sc`; level 2 weight `w_d` and activation `a_d` | none |
+| Q4_K × Q8_K | two paths; main leaves `a_q`, `w_q`; zero-point path leaf `a_q` | `{32, 256}`; level 1 weight `sc` on the main path and `m` on the zero-point path; level 2 weight `d` with activation `a_d` on the main path and `dmin` with activation `a_d` on the zero-point path | level 2, minus |
+| iq2_xxs × Q8_K | one path; leaves `a_q`, codebook-decoded `w_q`; IQ2 weight components are only `d` and `qs` | `{32, 256}`; level 1 weight factor decoded from `d` and the `s` field in `qs`; level 2 activation factor `a_d` | none |
 
 **Q4_0 × Q8_0**
 
 - Components: activation `a_q: int8 (m,k)` and `a_d: float16 (m,G_1)`; weight `w_q: uint8 (n,k/2)` and `w_d: float16 (n,G_1)`.
-- Decompression: split each packed weight byte into low and high nibbles, subtract the static offset 8, and restore GGML's 32-value block order before producing `w_q: int8 (n,k)`. The activation side stays a direct Q8_0 load.
+- The packed weight bytes are viewed as `(G_1, QK_1/2)`. For byte `(g, j)`, the low nibble is logical `k = g * QK_1 + j`, and the high nibble is logical `k = g * QK_1 + QK_1/2 + j`. Both nibbles belong to quantization block `g` and share its one weight scale. The reference kernel makes this pairing explicit with an order-preserving join, a transpose, and a fold; it does not split the whole K dimension into two halves.
+- The decoder masks and shifts each nibble, subtracts the static offset 8, and returns `w_q: int8 (n,k)`. The measured IR contains the four-dimensional intermediate, the transpose, and the collapse before the value enters the three-dimensional product.
 
 **Q4_K × Q8_K**
 
-- Components: activation `a_q: int8 (m,k)`, `a_d: float32 (m,G_2)`; weight `w_q: uint8 (n,k/2)`, `w_d`, `w_dmin: float16 (n,G_2)`, and 6-bit `w_sc`, `w_m: uint8 (n,G_1)`.
-- Level 2 merge, `main * (d * a_d) - zero * (dmin * a_d)`: each path takes its own level 2 factors before the subtraction. This form is numerically correct for any `d` and `dmin`, is the form WP A2 is to write, and is the form `benchmark/kernels/q4k_template_crosscheck.py` verifies.
-- Level 1 merge, `(red1 * sc - bs1 * m) * (d * a_d)`: recognition accepts it structurally, because it satisfies factor invariance and carries equal cumulative quantization block size on both sides of the merge, but it equals the level 2 merge only when `d == dmin` and is numerically wrong otherwise.
-- Decompression: unpack 4-bit weight codes with GGML's pairing across two adjacent 32-element sub-blocks — a byte's low nibble belongs to one sub-block and its high nibble to the next, not to the same sub-block — and unpack the 6-bit `w_sc` and `w_m` as factor-side decoding.
+- Components: activation `a_q: int8 (m,k)`, `a_d: float32 (m,G_2)`; weight `w_q: uint8 (n,k/2)`, `d`, `dmin`, and the packed 12-byte-per-super-block `scales` component.
+- The scale decoder follows `get_scale_min_k4`: for `j < 4`, `sc[j] = scales[j] & 63` and `m[j] = scales[j + 4] & 63`; for `j >= 4`, `sc[j] = (scales[j + 4] & 0xF) | ((scales[j - 4] >> 6) << 4)` and `m[j] = (scales[j + 4] >> 4) | ((scales[j] >> 6) << 4)`. The three four-byte fixed-offset loads and their bit operations produce both `(n,G_1)` level-1 factor tensors without a reduction.
+- The packed values use a different pairing from Q4_0. A group of 32 bytes covers 64 values: byte `(group,l)` contributes logical `group * 64 + l` from its low nibble in sub-block `group * 2`, and logical `group * 64 + 32 + l` from its high nibble in sub-block `group * 2 + 1`. The two nibbles therefore use different level-1 factors. The decoder's order-preserving join, transpose, and fold preserve this pairing.
+- The numerically correct merge is `main * (d * a_d) - zero * (dmin * a_d)`, with each path applying its own level-2 factors before the subtraction. The structurally accepted level-1 merge `(red1 * sc - bs1 * m) * (d * a_d)` is numerically correct only when `d == dmin`; the negative check in the reference script uses `d != dmin` and confirms that it deviates from the GGML result beyond the floating-point comparison tolerance.
 
 **iq2_xxs × Q8_K**
 
-- Components: activation `a_q: int8 (m,k)`, `a_d: float32 (m,G_2)`; weight `w_idx`, `w_sign`, `w_sc`, `w_d`, plus GGML's codebook grid and sign table as two independent structures.
-- Level 1 factor comes from factor-side decoding: the sub-block factor is derived from `w_sc` through a `(0.5 + s) * 0.25` computation instead of being loaded, while level 2 takes weight `w_d` and activation `a_d`.
-- Decompression: load each 8-value codebook index, look up magnitudes in the codebook grid, decode signs through the separate sign table, and combine them without replacing the two structures by a signed codebook.
+- The IQ2 weight has exactly two stored components: `d` and `qs`. There are no independent `w_idx`, `w_sign`, or `w_sc` tensors. For each 32-value sub-block, `qs` supplies two little-endian uint32 words: `aux32[0]` contains four 8-bit codebook indices, while `aux32[1]` contains four 7-bit sign indices and its high four bits contain the sub-block scale code `s`. Thus the codebook index, sign index, and scale code are all extracted from `qs`, and the scale code shares the uint32 with the sign indices.
+- The codebook is represented in the kernel as `uint8[256, 8]`, the byte view of GGML's `uint64[256]` `iq2xxs_grid`. The sign table is `uint8[128]` (`ksigns_iq2xs`), and `kmask_iq2xs` is `uint8[8]` with values `1, 2, 4, ..., 128`. The two decoded table paths are pointer-tensor `tl.load` operations; the captured IR contains two `linalg.index` and two `tensor.extract` operations and no explicit loop.
+- The level-1 factor is the factor-side decoding `d * (0.5 + s) * 0.25`, with shape `(n,G_1)`. The level-2 factor is the Q8_K activation `a_d`, and the chain is `{32,256}`. The captured IR has the integer level-1 reduction over `32`, the floating-point level-2 reduction over `8`, and the final reduction over `G_2`.
 
 ## 12. Measured Linalg Appendix
 
@@ -367,17 +375,123 @@ The compilation stage is `ttsharedir`, which runs `triton-shared-opt --triton-to
 
 The broadcasts of step 2 and of step 4.1.c each stay a `linalg.generic` of their own and write their result out to a full-size `(m, n, k)` or `(m, n, G_1)` intermediate tensor, instead of folding into the indexing map of the consumer that reads it. The cast to the accumulation type likewise stays a `linalg.generic` of its own instead of moving into the body of the `linalg.reduce` that follows it. Both foldings are loop scheduling decisions and belong to Phase B.
 
+### Q4_0 × Q8_0
+
+The captured function is `@q40_q80_canonical` at `(M,N,K,T) = (192,128,512,4)`. The decoder is a static, reduction-free prefix. The following lines are copied from `benchmark/mlir/q40_q80_canonical.ttshared.mlir`; the comments are the manual step annotations.
+
+```mlir
+// step 1 — decode the packed bytes: expose (G_1, QK_1/2), then join the two nibbles
+    %expanded = tensor.expand_shape %8 [[0], [1, 2]] output_shape [32, 16, 16] : tensor<32x256xi8> into tensor<32x16x16xi8> loc(#loc73)
+    %inserted_slice_2 = tensor.insert_slice %13 into %inserted_slice[0, 0, 0, 1] [32, 16, 16, 1] [1, 1, 1, 1] : tensor<32x16x16xi8> into tensor<32x16x16x2xi8> loc(#loc79)
+// step 1 — move the half-nibble axis and fold to the logical (n,k) operand
+    %transposed = linalg.transpose ins(%inserted_slice_2 : tensor<32x16x16x2xi8>) outs(%15 : tensor<32x16x2x16xi8>) permutation = [0, 1, 3, 2]  loc(#loc80)
+    %collapsed = tensor.collapse_shape %transposed [[0], [1, 2, 3]] : tensor<32x16x2x16xi8> into tensor<32x512xi8> loc(#loc81)
+// step 2 — expand the activation and decoded weight to the three-dimensional product
+    %expanded_3 = tensor.expand_shape %6 [[0], [1, 2]] output_shape [192, 1, 512] : tensor<192x512xi8> into tensor<192x1x512xi8> loc(#loc54)
+    %expanded_4 = tensor.expand_shape %collapsed [[0, 1], [2]] output_shape [1, 32, 512] : tensor<32x512xi8> into tensor<1x32x512xi8> loc(#loc55)
+// step 3 — element-wise product in i16
+    %23 = linalg.generic {indexing_maps = [#map, #map, #map], iterator_types = ["parallel", "parallel", "parallel"]} ins(%19, %22 : tensor<192x32x512xi16>, tensor<192x32x512xi16>) outs(%19 : tensor<192x32x512xi16>) {
+// ... body elided ...
+    } -> tensor<192x32x512xi16> loc(#loc58)
+// step 4.1.a/b — split (m,n,k) to (m,n,G_1,r_1), then reduce dimensions = [3]
+    %expanded_5 = tensor.expand_shape %23 [[0], [1], [2, 3]] output_shape [192, 32, 16, 32] : tensor<192x32x512xi16> into tensor<192x32x16x32xi16> loc(#loc59)
+    %reduced = linalg.reduce ins(%25 : tensor<192x32x16x32xi32>) outs(%27 : tensor<192x32x16xi32>) dimensions = [3]
+// step 4.1.c — factor broadcasts and application, all on (m,n,G_1)
+    %38 = linalg.generic {indexing_maps = [#map, #map, #map], iterator_types = ["parallel", "parallel", "parallel"]} ins(%34, %37 : tensor<192x32x16xf32>, tensor<192x32x16xf32>) outs(%34 : tensor<192x32x16xf32>) {
+// ... body elided ...
+    } -> tensor<192x32x16xf32> loc(#loc68)
+    %40 = linalg.generic {indexing_maps = [#map, #map, #map], iterator_types = ["parallel", "parallel", "parallel"]} ins(%39, %38 : tensor<192x32x16xf32>, tensor<192x32x16xf32>) outs(%39 : tensor<192x32x16xf32>) {
+// ... body elided ...
+    } -> tensor<192x32x16xf32> loc(#loc70)
+// step 5 — final plain reduction over G_1, dimensions = [2]
+    %reduced_12 = linalg.reduce ins(%40 : tensor<192x32x16xf32>) outs(%42 : tensor<192x32xf32>) dimensions = [2]
+```
+
+The decoder prefix contains no `linalg.reduce`; its three shape-changing operations are the measured `expand_shape`, `linalg.transpose`, and `collapse_shape` chain. The two reductions have the expected `32` and `16` reduction extents.
+
+### Q4_K × Q8_K
+
+The captured function is `@q4k_q8k_canonical` at the same specification. The physical decode also remains reduction-free; the measured order-restoring prefix includes the following operations:
+
+```mlir
+// step 1 — Q4_K physical (K/64,32,n) decode and explicit sub-block order
+    %transposed = linalg.transpose ins(%inserted_slice_7 : tensor<8x32x32x2xi8>) outs(%21 : tensor<8x2x32x32xi8>) permutation = [0, 3, 1, 2]  loc(#loc173)
+    %reshape = tensor.reshape %transposed(%cst) : (tensor<8x2x32x32xi8>, tensor<4xi64>) -> tensor<2x8x32x32xi8> loc(#loc174)
+    %transposed_8 = linalg.transpose ins(%reshape : tensor<2x8x32x32xi8>) outs(%22 : tensor<32x2x8x32xi8>) permutation = [3, 0, 1, 2]  loc(#loc175)
+    %collapsed = tensor.collapse_shape %transposed_8 [[0], [1, 2, 3]] : tensor<32x2x8x32xi8> into tensor<32x512xi8> loc(#loc176)
+// step 4.1.a/b — main path, QK_1 = 32, r_1 = 32
+    %expanded_22 = tensor.expand_shape %50 [[0], [1], [2, 3]] output_shape [192, 32, 16, 32] : tensor<192x32x512xi16> into tensor<192x32x16x32xi16> loc(#loc132)
+    %reduced = linalg.reduce ins(%52 : tensor<192x32x16x32xi32>) outs(%54 : tensor<192x32x16xi32>) dimensions = [3]
+// step 4.1.a/b — zero-point path, the same cumulative block size
+    %expanded_23 = tensor.expand_shape %58 [[0], [1], [2, 3]] output_shape [192, 32, 16, 32] : tensor<192x32x512xi32> into tensor<192x32x16x32xi32> loc(#loc136)
+    %reduced_24 = linalg.reduce ins(%expanded_23 : tensor<192x32x16x32xi32>) outs(%54 : tensor<192x32x16xi32>) dimensions = [3]
+// step 4.2.a/b — main and zero paths, QK_2 = 256, r_2 = 8
+    %expanded_27 = tensor.expand_shape %64 [[0], [1], [2, 3]] output_shape [192, 32, 2, 8] : tensor<192x32x16xf32> into tensor<192x32x2x8xf32> loc(#loc146)
+    %reduced_28 = linalg.reduce ins(%expanded_27 : tensor<192x32x2x8xf32>) outs(%70 : tensor<192x32x2xf32>) dimensions = [3]
+    %expanded_29 = tensor.expand_shape %68 [[0], [1], [2, 3]] output_shape [192, 32, 2, 8] : tensor<192x32x16xf32> into tensor<192x32x2x8xf32> loc(#loc148)
+    %reduced_30 = linalg.reduce ins(%expanded_29 : tensor<192x32x2x8xf32>) outs(%70 : tensor<192x32x2xf32>) dimensions = [3]
+// step 4 — level-2 merge, main minus zero, both operands carry (m,n,G_2)
+    %87 = linalg.generic {indexing_maps = [#map, #map, #map], iterator_types = ["parallel", "parallel", "parallel"]} ins(%82, %86 : tensor<192x32x2xf32>, tensor<192x32x2xf32>) outs(%82 : tensor<192x32x2xf32>) {
+      %90 = arith.subf %in, %in_44 : f32 loc(#loc165)
+      linalg.yield %90 : f32 loc(#loc165)
+    } -> tensor<192x32x2xf32> loc(#loc165)
+// step 5 — final plain reduction over G_2, dimensions = [2]
+    %reduced_42 = linalg.reduce ins(%87 : tensor<192x32x2xf32>) outs(%89 : tensor<192x32xf32>) dimensions = [2]
+```
+
+This gives five reductions: two level-1 reductions, two level-2 reductions, and the final reduction. The merge is the measured `arith.subf`, not a merge inferred from the factor names.
+
+### iq2_xxs × Q8_K
+
+The captured function is `@iq2xxs_q8k_canonical`, again with `G_1 = 16`, `G_2 = 2`, `r_1 = 32`, and `r_2 = 8`. The `qs` bit-field preparation, codebook lookup, and sign lookup are all visible before the canonical product:
+
+```mlir
+// step 1 — expose qs words and split the two aux32 fields
+    %expanded = tensor.expand_shape %24 [[0], [1, 2], [3]] output_shape [2, 16, 2, 32] : tensor<2x32x32xi32> into tensor<2x16x2x32xi32> loc(#loc176)
+    %transposed = linalg.transpose ins(%expanded : tensor<2x16x2x32xi32>) outs(%25 : tensor<2x16x32x2xi32>) permutation = [0, 1, 3, 2]  loc(#loc177)
+    %extracted_slice = tensor.extract_slice %transposed[0, 0, 0, 0] [2, 16, 32, 1] [1, 1, 1, 1] : tensor<2x16x32x2xi32> to tensor<2x16x32xi32> loc(#loc103)
+    %expanded_7 = tensor.expand_shape %extracted_slice [[0], [1, 2], [3]] output_shape [2, 8, 2, 32] : tensor<2x16x32xi32> into tensor<2x8x2x32xi32> loc(#loc178)
+// step 1 — codebook table path: pointer-tensor indexing and extraction
+    %47 = linalg.generic {indexing_maps = [#map5, #map4], iterator_types = ["parallel", "parallel"]} ins(%collapsed_19 : tensor<2048xi32>) outs(%46 : tensor<2048x8xi8>) {
+      %103 = linalg.index 1 : index loc(#loc200)
+      %extracted = tensor.extract %45[%104] : tensor<?xi8> loc(#loc200)
+    } -> tensor<2048x8xi8> loc(#loc200)
+// step 1 — sign table path: one extracted byte per flattened sign index
+    %52 = linalg.generic {indexing_maps = [#map1, #map1], iterator_types = ["parallel"]} ins(%collapsed_22 : tensor<2048xi32>) outs(%51 : tensor<2048xi8>) {
+      %extracted = tensor.extract %50[%101] : tensor<?xi8> loc(#loc204)
+    } -> tensor<2048xi8> loc(#loc204)
+// step 2/3 — the decoded values enter the ordinary broadcast and product path
+    %expanded_34 = tensor.expand_shape %20 [[0], [1, 2]] output_shape [192, 1, 512] : tensor<192x512xi8> into tensor<192x1x512xi8> loc(#loc152)
+    %expanded_35 = tensor.expand_shape %collapsed_30 [[0, 1], [2]] output_shape [1, 32, 512] : tensor<32x512xi8> into tensor<1x32x512xi8> loc(#loc153)
+// step 4.1.a/b — integer level-1 reduction over r_1 = 32
+    %expanded_36 = tensor.expand_shape %83 [[0], [1], [2, 3]] output_shape [192, 32, 16, 32] : tensor<192x32x512xi16> into tensor<192x32x16x32xi16> loc(#loc157)
+    %reduced = linalg.reduce ins(%85 : tensor<192x32x16x32xi32>) outs(%87 : tensor<192x32x16xi32>) dimensions = [3]
+// step 4.2.a/b — floating-point level-2 reduction over r_2 = 8
+    %expanded_38 = tensor.expand_shape %91 [[0], [1], [2, 3]] output_shape [192, 32, 2, 8] : tensor<192x32x16xf32> into tensor<192x32x2x8xf32> loc(#loc164)
+    %reduced_39 = linalg.reduce ins(%expanded_38 : tensor<192x32x2x8xf32>) outs(%93 : tensor<192x32x2xf32>) dimensions = [3]
+// step 5 — final plain reduction over G_2, dimensions = [2]
+    %reduced_43 = linalg.reduce ins(%98 : tensor<192x32x2xf32>) outs(%100 : tensor<192x32xf32>) dimensions = [2]
+```
+
+The IQ2 file contains three reductions, two `tensor.extract` operations, and two `linalg.index` operations. The `linalg.index 1` in the codebook generic supplies the row's byte coordinate; the other `linalg.index` is the compile-time lane-index generator used while extracting the four fields. The sign-table generic consumes a flattened index directly and contributes the second `tensor.extract`. There is no `scf.for`, and the table lookup remains a parallel `linalg.generic`.
+
+The four main captures are therefore concrete A3 samples rather than inferred shapes: Q8_0 has two reductions, Q4_0 has two, Q4_K has five, and iq2_xxs has three. The auxiliary captures are `benchmark/mlir/synthetic_l3_canonical.ttshared.mlir`, `benchmark/mlir/q80_q80_partition.ttshared.mlir`, and `benchmark/mlir/iq2xxs_gather_probe.ttshared.mlir`; they close structural checks but are not substituted for the four required format samples.
+
 ## 13. Open Items
 
-The items below are deliberately left open, not oversights. Each names the work package that fixes it, and each waits on real cases rather than on a decision that could be taken now.
+The six open items assigned to WP A2 are closed by the reference kernels and the measured IR in this document:
 
-- The list of concrete rejection conditions, and the diagnostic wording each one carries, stays open until real non-conforming kernels exist to fix it against — WP A3, WP A5.
-- Writing constraints inside the decompression region and inside factor-side decoding: section 6 describes both without enumerating what may appear in them, and the constraints tighten as formats accumulate — WP A2.
-- The output form of layout feedback and of the cross-operator layout requirement, over the layout information section 7 makes recoverable — WP A3, WP A4.
-- Divisibility chains of more than two levels: section 3 constructs a chain for any `L >= 1`, but only `L = 1` and `L = 2` are exercised by kernels in the tree — WP A2.
-- Thread-level partitions other than the reference writing of section 8: a two-dimensional grid, a partition along M, and further partitions are accepted writings, since no legality condition mentions the grid, but no kernel in the tree exercises them, so they stay accepted and unverified — WP A2.
-- One `ttshared.mlir` per format: WP A2's acceptance scope includes dumping that file for all four formats, because section 12 shows measured Linalg for the degenerate single-path format only. Capture is `source env.sh`, clear `$TRITON_CACHE_DIR`, run the kernel, take `ttshared.mlir` from `$TRITON_SHARED_DUMP_PATH` — WP A2.
-- Q4_K's nibble pairing across two adjacent 32-element sub-blocks and iq2_xxs's separate codebook grid and sign table, both recorded in section 11, are awkward to write with the dimension transformations of section 6; which pairing and which table shape become the layout requirement put to the user is open — WP A2, WP B3 (Phase B).
+1. The decompression-region and factor-side decoding checklist is now explicit in section 6. The four formats exercise direct loads, static shape changes, bit masks and shifts, integer conversions, order-preserving joins, transposes, folds, field splitting, pointer-tensor table loads, sign selection, and factor arithmetic. All four regions are reduction-free, use compile-time shape parameters, and return factors without the level's reduced `r_j` dimension.
+2. The synthetic kernel `benchmark/kernels/synthetic_l3_canonical.py` covers a three-level chain `{32, 128, 512}` with ratios `{32, 4, 4}`. Its measured file `benchmark/mlir/synthetic_l3_canonical.ttshared.mlir` contains the three level reductions with shapes `32x16x32x32 -> 32x16x32`, `32x16x8x4 -> 32x16x8`, and `32x16x2x4 -> 32x16x2`, followed by the final reduction. Each level's factor omits its reduced dimension.
+3. `benchmark/kernels/q80_q80_partition.py` covers both a two-dimensional grid and a grid partitioned along M. The measured variants write disjoint output tiles, and both agree with the N-only reference partition and the independent reference implementation. Recognition therefore has no dependency on the reference grid shape.
+4. The four required format captures are `benchmark/mlir/q80_q80_strict.ttshared.mlir`, `q40_q80_canonical.ttshared.mlir`, `q4k_q8k_canonical.ttshared.mlir`, and `iq2xxs_q8k_canonical.ttshared.mlir`. They were captured from the four main result kernels at `(192,128,512,4)` and are the measured Linalg samples summarized in section 12. The auxiliary synthetic, partition, and standalone IQ2 gather captures remain separate.
+5. Section 11 fixes the user-visible physical layout requirements: Q4_0 pairs both nibbles within one 32-value block, Q4_K pairs nibbles across adjacent 32-value sub-blocks, and iq2_xxs uses the `uint8[256,8]` codebook byte view, `uint8[128]` sign table, and `uint8[8]` mask table. The IQ2 weight components are only `d` and `qs`, with all three bit fields extracted from `qs`.
+6. The arbitrary finite layout-chain item is covered by the two Q8_0 variants in `q80_q80_layout.py` (`trans -> reshape` and `reshape -> trans -> reshape`) and by the Q4_0 decoder's measured shape-changing prefix. The latter includes a fold, transpose, and second fold with changed shapes, so the evidence is not limited to an identity-equivalent tail.
+
+No WP A2 item remains open. The following items belong to later work and are intentionally retained:
+
+- The complete set of non-conforming-input rejection conditions and the diagnostic wording for each one waits for the recognizer and its negative cases — WP A3 and WP A5.
+- The output form of layout feedback and the cross-operator layout requirement waits for the recognition and pass-organization decisions — WP A3 and WP A4.
 
 ## 14. Glossary and Scope Boundary
 
