@@ -490,8 +490,8 @@ The six open items assigned to WP A2 are closed by the reference kernels and the
 
 No WP A2 item remains open. The following items belong to later work and are intentionally retained:
 
-- The complete set of non-conforming-input rejection conditions and the diagnostic wording for each one waits for the recognizer and its negative cases — WP A3 and WP A5.
-- The output form of layout feedback and the cross-operator layout requirement waits for the recognition and pass-organization decisions — WP A3 and WP A4.
+- The complete set of non-conforming-input rejection conditions and the diagnostic wording for each one waits for the recognizer and its negative cases. WP A3 implements the legality checks of sections 2, 3, 4 and 6 and reports, for each reduction root, the first condition that root violated; WP A5 completes the catalog and its wording.
+- The output form of layout feedback and the cross-operator layout requirement waits for the pass-organization decisions of WP A4. WP A3 covers only the composition of an activation-side layout expression chain into one permutation and one fold, as a component with no consumer yet; the layout of a component that has to be decoded is recovered when its first consumer appears, in WP B3.
 
 ## 14. Glossary and Scope Boundary
 
@@ -510,4 +510,4 @@ Every term below appears in the body of this document and carries the meaning fi
 
 Scope boundary. This document specifies QGEMM and does not cover GEMV, which is bound by memory bandwidth rather than by compute density. The project's compilation output ends at optimized Linalg IR, so VIR, the Vector dialect, LLVM IR and machine code are consumed from buddy-mlir rather than specified here. This document describes a user writing convention only: it fixes no compiler pass design and no implementation, and every place the text speaks of what the compiler does is an obligation on later work.
 
-The compiler recognizes the canonical form and emits a diagnostic for input that does not conform, instead of exiting silently; the list of conditions it rejects on is open, see section 13.
+The compiler recognizes the canonical form and leaves input that does not conform untouched and unreported, because most of the code it examines was never a QGEMM and a remark on each such function would bury the ones that matter. The explanation of why recognition declined is available through an option that is off by default, and then names, for each reduction root, the first condition that root violated. The list of conditions it rejects on is open, see section 13.
