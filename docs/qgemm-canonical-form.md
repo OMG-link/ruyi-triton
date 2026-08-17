@@ -49,7 +49,7 @@ flowchart TD
     MG --> OUT["final reduction, no factor -> (m,n)"]
 ```
 
-The one legality condition on a merge is that both operands carry the same cumulative quantization block size `C` there, equivalently the same current shape. Neither the level index nor the inner split structure of the two paths has to agree. A path whose factors exist only at the outer level may skip the inner split and reduce 256 elements in one step: its level index is 1 where the main path's is 2, and the merge stays legal, because both operands have reduced 256 elements. Deciding by equal level indices, or by walking the two chains and demanding the two paths agree on every level's block size, rejects that writing wrongly.
+The canonical form requires both operands of a merge to carry the same cumulative quantization block size `C`, equivalently the same current shape. This is a user-facing requirement: A3 does not enforce it, because the recognizer exports no merge semantics; WP B5 introduces the legality check when reduction backtracking first parses merge levels. The two paths need not agree on level indices or inner split structure, only on the cumulative amount reduced at the merge.
 
 | Path-internal step | Operation | Shapes | Stage |
 |--------------------|-----------|--------|-------|
@@ -90,7 +90,7 @@ Chain order is therefore the order in which that path's split reshapes are writt
 
 Within one path the levels collect the quantization levels of both its leaves: equal block sizes on the two sides become one level, unequal sizes stay separate levels. A factor may exist on only one side at a level; the other side then contributes the constant factor 1, leaving that level's shape unchanged.
 
-Two paths of the same DAG need not agree. Their numbers of levels may differ, and their level `j` may carry different block sizes. Nothing ties two chains together except a merge point, where the two operands must have the same cumulative quantization block size `C`, equivalently the same current shape; merging two intermediate results with unequal `C` is not the canonical form. That single condition is the reduction-DAG form of forbidding a factor to move across levels: a factor belongs to the level whose reduction produced the value it multiplies, and joining values that have reduced different element counts would be the only way to slide it elsewhere.
+Two paths of the same DAG need not agree. Their numbers of levels may differ, and their level `j` may carry different block sizes. Nothing ties two chains together except a merge point, where the canonical form requires the two operands to have the same cumulative quantization block size `C`, equivalently the same current shape; merging two intermediate results with unequal `C` is not the canonical form. This requirement keeps each factor with the reduction result it multiplies, while allowing paths with different level numbering or inner split structure to meet after reducing the same number of elements. A3 does not enforce equal `C`; WP B5 introduces that legality check together with the reduction backtracking that first parses merge levels.
 
 For Q4_K x Q8_K the DAG has two paths, each with the chain `{32, 256}`:
 
@@ -107,7 +107,7 @@ The two paths merge after level 2, where both carry `C = 256`, with the sign the
 
 Factor invariance is the one load-bearing condition of the canonical form: a factor does not vary along the dimension reduced at its level. Its algebraic basis is `sum_r (s * x_r) = s * sum_r x_r`, which holds exactly when `s` does not vary with `r`, and it is readable straight off Linalg: the factor operand's indexing map over that level's iteration domain does not contain the reduced dimension.
 
-Applying a factor before the reduction and applying it afterwards are therefore two writings of one thing, and recognition accepts both. A factor tensor whose rank equals that of the level's reduction result `(m, n, G_j)` is the post-reduction special case: the reduced dimension is not in the iteration domain at all, so invariance holds automatically. A factor applied before the reduction is equally invariant as long as its map omits that dimension. A factor absent from one side is the constant 1.
+A factor is applied to its level's reduction result, as step 4.j.(c) of section 2 already states. Its tensor therefore has the rank of `(m, n, G_j)`, the dimension reduced at that level is not in the applying operation's iteration domain at all, and invariance holds by construction rather than by inspection. Invariance is accordingly the rationale for the form rather than a condition a compiler re-establishes: it is why a block sum may be accumulated in the accumulation type and scaled once per quantization block instead of once per element, and why the K-dimension tile constraint of later work is stated in multiples of the quantization block size. A factor absent from one side is the constant 1.
 
 Two factors at one level, one per side, may be multiplied together and applied once, or applied in sequence; invariance plus commutativity of multiplication makes the two forms equivalent. The choice is the user's because multiplication order affects floating-point precision, and compiler transformations preserve the order written:
 
@@ -116,7 +116,7 @@ level = red.to(tl.float32) * (a_d.to(tl.float32) * w_d.to(tl.float32))   # facto
 level = red.to(tl.float32) * a_d.to(tl.float32) * w_d.to(tl.float32)     # or in sequence
 ```
 
-Branch linearity makes a zero point an ordinary path rather than a special case. Its leaf is a single broadcast operand, readable as a degenerate element-wise multiply against the constant 1; its per-level factors are that format's zero-point factors, `m` at level 1 and `dmin` at level 2 for Q4_K; and it joins the main path at one level through a subtraction. The sign is the one the user wrote, and recognition records only whether a merge point adds or subtracts. A zero point on each of the two operands is then expressible directly: `(a_q - a_z)(w_q - w_z)` expands into four paths merged with `+` and `-`, each path satisfying the invariant of section 2 on its own.
+Branch linearity makes a zero point an ordinary path rather than a special case. Its leaf is a single broadcast operand, readable as a degenerate element-wise multiply against the constant 1; its per-level factors are that format's zero-point factors, `m` at level 1 and `dmin` at level 2 for Q4_K; and it joins the main path at one level through a subtraction. The sign is the one the user wrote, and compiler transformations preserve it; recording it is deferred to the first work package that parses a factor application. A zero point on each of the two operands is then expressible directly: `(a_q - a_z)(w_q - w_z)` expands into four paths merged with `+` and `-`, each path satisfying the invariant of section 2 on its own.
 
 ## 5. Cast Positions
 
@@ -490,8 +490,8 @@ The six open items assigned to WP A2 are closed by the reference kernels and the
 
 No WP A2 item remains open. The following items belong to later work and are intentionally retained:
 
-- The complete set of non-conforming-input rejection conditions and the diagnostic wording for each one waits for the recognizer and its negative cases. WP A3 implements the legality checks of sections 2, 3, 4 and 6 and reports, for each reduction root, the first condition that root violated; WP A5 completes the catalog and its wording.
-- The output form of layout feedback and the cross-operator layout requirement waits for the pass-organization decisions of WP A4. WP A3 covers only the composition of an activation-side layout expression chain into one permutation and one fold, as a component with no consumer yet; the layout of a component that has to be decoded is recovered when its first consumer appears, in WP B3.
+- The A3 recognizer's canonical-form legality checks are exactly three: every non-degenerate path terminates at a product of two level-0 components (or a degenerate path at one level-0 component); every path has a strictly increasing divisibility chain whose block sizes and final block divide `K`; and the upstream region of every operator input contains no reduction operation or reduction iterator. The A1 section 6 decompression region is a subset of that input upstream region. Equal cumulative `C` at a merge remains a user requirement but is not enforced by A3; WP B5 introduces that check when reduction backtracking first parses merges. Factor invariance is the rationale for the canonical form, not an A3 check. WP A5 completes the rejection catalogue and its diagnostic wording.
+- The output form of layout feedback and the cross-operator layout requirement waits for the pass-organization decisions of WP A4. WP A3 covers only the composition of the layout expression chain of a component that reaches the computation without decoding into one permutation and one fold, as a component with no consumer yet; the layout of a component that has to be decoded is recovered when its first consumer appears, in WP B3.
 
 ## 14. Glossary and Scope Boundary
 
