@@ -49,7 +49,7 @@ flowchart TD
     MG --> OUT["final reduction, no factor -> (m,n)"]
 ```
 
-The canonical form requires both operands of a merge to carry the same cumulative quantization block size `C`, equivalently the same current shape. This is a user-facing requirement: A3 does not enforce it, because the recognizer exports no merge semantics; WP B5 introduces the legality check when reduction backtracking first parses merge levels. The two paths need not agree on level indices or inner split structure, only on the cumulative amount reduced at the merge.
+The canonical form requires both operands of a merge to carry the same cumulative quantization block size `C`, equivalently the same current shape. Neither the level index nor the inner split structure of the two paths has to agree. A path whose factors exist only at the outer level may skip the inner split and reduce 256 elements in one step: its level index is 1 where the main path's is 2, and the merge stays legal, because both operands have reduced 256 elements. This is a user-facing requirement: A3 does not enforce it, because the recognizer exports no merge semantics; WP B5 introduces the legality check when reduction backtracking first parses merge levels, and decides it on the cumulative amount reduced at the merge rather than on equal level indices or on agreement between the two chains about every level's block size, either of which would reject the writing above.
 
 | Path-internal step | Operation | Shapes | Stage |
 |--------------------|-----------|--------|-------|
@@ -61,6 +61,8 @@ The canonical form requires both operands of a merge to carry the same cumulativ
 | level `j` factors | apply this level's factors to this level's reduction result | `(m, n, G_j) -> (m, n, G_j)` | scaling |
 | merge | one addition or subtraction of two paths with equal `C` | two `(m, n, G_j) -> (m, n, G_j)` | scaling |
 | final reduction | outermost plain reduction, carrying no factor | `(m, n, G_L) -> (m, n)` | scaling |
+
+For recognition, the two annotation stage values are `data_prep` and `compute`: `data_prep` covers data preparation, and `compute` is the core stage in which matrix multiplication and scaling remain together. The three-stage distinction is introduced by the consumers that separate those computations.
 
 ### Single-path instance
 
@@ -76,7 +78,7 @@ For `L = 1` the levels expand as `(m,n,K) -> (m,n,K/QK_1,QK_1) -> (m,n,K/QK_1) -
 
 For `L = 2` with `K = 512`, `QK_1 = 32`, `QK_2 = 256`, hence `G_1 = 16`, `G_2 = 2`, `r_2 = 8`: `(m,n,512) -> (m,n,16,32) -> (m,n,16) -> (m,n,16) -> (m,n,2,8) -> (m,n,2) -> (m,n,2) -> (m,n)`.
 
-No path contains `tl.dot`. A writing that splits the quantization-block dimensions before broadcasting and directly broadcasts four- or five-dimensional tensors, as existing kernels under `benchmark/kernels/` do, is not the canonical form.
+No path contains `tl.dot`. A writing that splits the quantization-block dimensions before broadcasting and directly broadcasts four- or five-dimensional tensors is not the canonical form.
 
 ## 3. Divisibility Chain
 
@@ -155,7 +157,7 @@ Triton represents a quantized tensor as planar components. Q4_K therefore has se
 
 ## 7. Layout Expression Chains
 
-Each input component that reaches the computation without decoding — the activation quantized values, and a factor that is loaded rather than derived — expresses its real memory layout with the chain `multidimensional tl.make_block_ptr + tl.load -> a sequence of tl.trans and tl.reshape steps -> the logical shape`. The sequence may have any finite length, and there are only two conditions on it: every step's arguments are compile-time constants, and the whole sequence composes into one static permutation followed by one fold, from which the physical dimension order, each dimension's length, and each dimension's stride are still recoverable. Neither transformation is restricted to a single occurrence. A physical layout whose logical dimension order appears only once two of the loaded dimensions have been split apart is written `reshape -> trans -> reshape`: the first reshape exposes the split, the permutation puts the pieces in logical order, and the second reshape folds them back. Limiting each transformation to one occurrence would reject that writing for no reason. A component that has to be decoded is governed by section 6 instead, which constrains the shape its decoding produces rather than the way its stored form is loaded.
+Each input component that reaches the computation without decoding — the activation quantized values, and a factor that is loaded rather than derived — expresses its real memory layout with a dimension-transform chain from the physical load to the logical shape. The user's dimension-transform chain is simplified to the canonical form: one permute and one reshape. The sequence may have any finite length, and there are only two conditions on it: every step's arguments are compile-time constants, and the whole sequence composes into one static permutation followed by one fold, from which the physical dimension order, each dimension's length, and each dimension's stride are still recoverable. Neither transformation is restricted to a single occurrence. A physical layout whose logical dimension order appears only once two of the loaded dimensions have been split apart is written `reshape -> trans -> reshape`: the first reshape exposes the split, the permutation puts the pieces in logical order, and the second reshape folds them back. Limiting each transformation to one occurrence would reject that writing for no reason. A component that has to be decoded is governed by section 6 instead, which constrains the shape its decoding produces rather than the way its stored form is loaded.
 
 `tl.make_block_ptr` declares the real physical dimension order through `shape`, the element stride of each dimension through `strides`, and row-major traversal through descending `order = (rank-1, ..., 0)`. These values, the permutation, and the reshape targets are statically evaluable from literals and `tl.constexpr` values. `tl.trans` maps physical dimension order to logical dimension order, and `tl.reshape` then folds adjacent dimensions to that component's own logical shape: `(m, k)` or `(n, k)` for quantized values that need no decoding, and `(m, G_j)` on the activation side or `(n, G_j)` on the weight side, with `G_j = K / QK_j`, for a level `j` factor that is loaded rather than derived. A zero-point component has the same shape as its level's scale factor component and runs the same chain. Identity permutation or fold steps may be omitted.
 
@@ -481,7 +483,7 @@ The four main captures are therefore concrete A3 samples rather than inferred sh
 
 The six open items assigned to WP A2 are closed by the reference kernels and the measured IR in this document:
 
-1. The decompression-region and factor-side decoding checklist is now explicit in section 6. The four formats exercise direct loads, static shape changes, bit masks and shifts, integer conversions, order-preserving joins, transposes, folds, field splitting, pointer-tensor table loads, sign selection, and factor arithmetic. All four regions are reduction-free, use compile-time shape parameters, and return factors without the level's reduced `r_j` dimension.
+1. The decompression-region and factor-side decoding checklist is explicit in section 6. The four formats exercise direct loads, static shape changes, bit masks and shifts, integer conversions, order-preserving joins, transposes, folds, field splitting, pointer-tensor table loads, sign selection, and factor arithmetic. All four regions are reduction-free, use compile-time shape parameters, and return factors without the level's reduced `r_j` dimension.
 2. The synthetic kernel `benchmark/kernels/synthetic_l3_canonical.py` covers a three-level chain `{32, 128, 512}` with ratios `{32, 4, 4}`. Its measured file `benchmark/mlir/synthetic_l3_canonical.ttshared.mlir` contains the three level reductions with shapes `32x16x32x32 -> 32x16x32`, `32x16x8x4 -> 32x16x8`, and `32x16x2x4 -> 32x16x2`, followed by the final reduction. Each level's factor omits its reduced dimension.
 3. `benchmark/kernels/q80_q80_partition.py` covers both a two-dimensional grid and a grid partitioned along M. The measured variants write disjoint output tiles, and both agree with the N-only reference partition and the independent reference implementation. Recognition therefore has no dependency on the reference grid shape.
 4. The four required format captures are `benchmark/mlir/q80_q80_strict.ttshared.mlir`, `q40_q80_canonical.ttshared.mlir`, `q4k_q8k_canonical.ttshared.mlir`, and `iq2xxs_q8k_canonical.ttshared.mlir`. They were captured from the four main result kernels at `(192,128,512,4)` and are the measured Linalg samples summarized in section 12. The auxiliary synthetic, partition, and standalone IQ2 gather captures remain separate.
@@ -491,7 +493,8 @@ The six open items assigned to WP A2 are closed by the reference kernels and the
 No WP A2 item remains open. The following items belong to later work and are intentionally retained:
 
 - The A3 recognizer's canonical-form legality checks are exactly three: every non-degenerate path terminates at a product of two level-0 components (or a degenerate path at one level-0 component); every path has a strictly increasing divisibility chain whose block sizes and final block divide `K`; and the upstream region of every operator input contains no reduction operation or reduction iterator. The A1 section 6 decompression region is a subset of that input upstream region. Equal cumulative `C` at a merge remains a user requirement but is not enforced by A3; WP B5 introduces that check when reduction backtracking first parses merges. Factor invariance is the rationale for the canonical form, not an A3 check. WP A5 completes the rejection catalogue and its diagnostic wording.
-- The output form of layout feedback and the cross-operator layout requirement waits for the pass-organization decisions of WP A4. WP A3 covers only the composition of the layout expression chain of a component that reaches the computation without decoding into one permutation and one fold, as a component with no consumer yet; the layout of a component that has to be decoded is recovered when its first consumer appears, in WP B3.
+- The A3 ownership boundary leaves three recognizer obligations to later consumers: the divisibility-chain and block-size check belongs to WP B2; the condition that an input's upstream region contains no reduction operation or reduction iterator belongs to WP B1; and matrix multiplication structure calibration is a prerequisite of WP B1.
+- The output form of layout feedback and the cross-operator layout requirement waits for the pass-organization decisions of WP A4. WP A3 covers the dimension-transform chain of a component that reaches the computation without decoding by simplifying it into one permutation and one reshape; the layout of a component that has to be decoded is recovered when its first consumer appears, in WP B3.
 
 ## 14. Glossary and Scope Boundary
 
@@ -503,6 +506,7 @@ Every term below appears in the body of this document and carries the meaning fi
 | path, merge point, factor invariance | 路径, 合并点, 因子不变性 |
 | quantization block, quantization block size, quantization level, divisibility chain, cumulative quantization block size | 量化块, 量化块大小, 量化级, 整除链, 累积量化块大小 |
 | data preparation stage, matrix multiplication stage, scaling stage | 数据准备阶段, 矩阵乘阶段, 缩放阶段 |
+| compute stage | 核心区 |
 | decompression region, factor-side decoding, planar component tensor, codebook | 解压区域, 因子侧解码, 分量张量, 码本 |
 | scale factor, zero point, product type, accumulation type, scaled type | 缩放因子, 零点, 乘积类型, 累加类型, 缩放类型 |
 | layout expression chain, layout feedback, cross-operator layout propagation | 布局表达链, 布局反馈, 跨算子布局传递 |
