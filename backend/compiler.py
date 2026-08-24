@@ -200,6 +200,8 @@ def _ttsharedir_to_vectorir(ttsharedir: str):
 
         passes = []
         if _is_qgemm_opt_enabled():
+            passes.append("--qgemm-simplify-dim-transforms")
+            passes.append("--qgemm-recognize")
             passes.append("--qgemm-tiling=tile-m=32 tile-n=32")
             passes.append("--qgemm-tiling=tile-m=4 tile-n=4")
         passes.extend([
