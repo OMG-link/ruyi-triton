@@ -3,7 +3,7 @@
 This test verifies that the decompose pass (tt.dot → trans/expand_dims/broadcast/mulf/reduce)
 produces numerically equivalent results to PyTorch's torch.matmul reference implementation.
 
-The decompose pass is enabled by default via TRITON_ENABLE_QGEMM_OPT=1.
+The decompose pass is enabled per launch via the qgemm_opt_enable=1 compile option.
 We run a Triton kernel with tl.dot through the full compilation pipeline
 (which includes --decompose-high-level-ops) and compare against PyTorch.
 """
@@ -17,8 +17,6 @@ from hypothesis import given, settings, assume, HealthCheck
 from hypothesis import strategies as st
 
 
-# Ensure the decompose pass is enabled
-os.environ.setdefault("TRITON_ENABLE_QGEMM_OPT", "1")
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +134,7 @@ def run_dot_f32(M, N, K, a, b, c_acc):
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
         BLOCK_K=BLOCK_K,
+        qgemm_opt_enable=1,
     )
     return out
 
@@ -159,6 +158,7 @@ def run_dot_f16_to_f32(M, N, K, a_f16, b_f16, c_acc_f32):
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
         BLOCK_K=BLOCK_K,
+        qgemm_opt_enable=1,
     )
     return out
 

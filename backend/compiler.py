@@ -59,32 +59,14 @@ def _get_sanitizer_type():
     return sanitizer_type
 
 
-def _is_qgemm_opt_enabled():
-    """Check whether QGEMM optimization passes are enabled.
-
-    Reads the TRITON_ENABLE_QGEMM_OPT environment variable.
-    This switch controls all QGEMM-related optimization passes
-    (currently: decompose-high-level-ops; more may be added in the future).
-
-    Development-phase default: ENABLED (True when env var is unset).
-    For production release, change the default to False.
-    """
-    val = os.getenv("TRITON_ENABLE_QGEMM_OPT")
-    if val is None:
-        # Development-phase default: enabled.
-        # TODO: Change to False for production release.
-        return True
-    return val.lower() in ("1", "true")
-
-
-def _build_ttsharedir_passes():
+def _build_ttsharedir_passes(options):
     passes = []
 
     if _get_sanitizer_type() != "":
         print("Building with sanitizer support...")
         passes.append("--add-llvm-debug-info")
 
-    if _is_qgemm_opt_enabled():
+    if options.qgemm_opt_enable:
         passes.append("--decompose-high-level-ops")
 
     passes.append("--triton-to-linalg-experimental")
@@ -92,7 +74,7 @@ def _build_ttsharedir_passes():
     return passes
 
 
-def _ttir_to_ttsharedir(mod):
+def _ttir_to_ttsharedir(mod, options):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -105,7 +87,7 @@ def _ttir_to_ttsharedir(mod):
         subprocess_args = [
             triton_shared_opt_path,
             src_path,
-            *_build_ttsharedir_passes(),
+            *_build_ttsharedir_passes(options),
             "--mlir-print-debuginfo",
             "-o",
             dst_path,
@@ -191,38 +173,43 @@ def _optimize_llir(llir: str):
     #     return Path(lliropt_path).read_text()
     return llir
 
-def _ttsharedir_to_vectorir(ttsharedir: str):
+def _build_vectorir_passes(options):
+    passes = []
+    if options.qgemm_opt_enable:
+        passes.append("--qgemm-simplify-dim-transforms")
+        passes.append("--qgemm-recognize")
+        passes.append("--qgemm-tiling=tile-m=32 tile-n=32")
+        passes.append(
+            f"--qgemm-tiling=tile-m={options.qgemm_mr} tile-n={options.qgemm_nr}"
+        )
+    passes.extend([
+        # Note: eliminate-empty-tensors fails when there are multiple func.return ops
+        # in a single kernel which are the results of early returns.
+        # See python/examples/test_early_return.py for examples.
+        # We disable this pass for now since performance on CPU isn't the main
+        # focus at the moment.
+        # "--eliminate-empty-tensors",
+        "--empty-tensor-to-alloc-tensor",
+        "--one-shot-bufferize=allow-return-allocs-from-loops=true",
+        "--lower-linalg-to-vir",
+        "--lower-vir-to-vector=vector-width=4",
+        "--convert-linalg-to-affine-loops",
+    ])
+    return passes
+
+
+def _ttsharedir_to_vectorir(ttsharedir: str, options):
     with tempfile.TemporaryDirectory() as tmpdir:
         ttshared_path = os.path.join(tmpdir, "ttshared.mlir")
         vector_path = os.path.join(tmpdir, "vector.mlir")
         Path(ttshared_path).write_text(ttsharedir)
         buddy_opt_path = _get_buddy_opt_path()
 
-        passes = []
-        if _is_qgemm_opt_enabled():
-            passes.append("--qgemm-simplify-dim-transforms")
-            passes.append("--qgemm-recognize")
-            passes.append("--qgemm-tiling=tile-m=32 tile-n=32")
-            passes.append("--qgemm-tiling=tile-m=4 tile-n=4")
-        passes.extend([
-            # Note: eliminate-empty-tensors fails when there are multiple func.return ops
-            # in a single kernel which are the results of early returns.
-            # See python/examples/test_early_return.py for examples.
-            # We disable this pass for now since performance on CPU isn't the main
-            # focus at the moment.
-            # "--eliminate-empty-tensors",
-            "--empty-tensor-to-alloc-tensor",
-            "--one-shot-bufferize=allow-return-allocs-from-loops=true",
-            "--lower-linalg-to-vir",
-            "--lower-vir-to-vector=vector-width=4",
-            "--convert-linalg-to-affine-loops",
-        ])
-
         subprocess.check_call(
             [
                 buddy_opt_path,
                 ttshared_path,
-                *passes,
+                *_build_vectorir_passes(options),
                 "--mlir-print-debuginfo",
                 "-o",
                 vector_path,
@@ -365,6 +352,49 @@ def _llir_to_bin(llir: str, metadata):
         return Path(dst_path).read_bytes()
 
 
+# Tuning options whose specification implies qgemm_opt_enable=1.
+_QGEMM_TUNING_KEYS = ("qgemm_mr", "qgemm_nr")
+_QGEMM_TUNING_DEFAULTS = {"qgemm_mr": 4, "qgemm_nr": 4}
+
+
+def _to_int(name, v):
+    """Normalize a 0/1/True/False switch value to int; reject anything else."""
+    if isinstance(v, bool) or (type(v) is int and v in (0, 1)):
+        return int(v)
+    raise ValueError(f"{name} must be one of 0, 1, True, False, got {v!r}")
+
+
+def _check_positive_int(name, v):
+    """Return v if it is a positive int (bool excluded); raise otherwise."""
+    if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {v!r}")
+    return v
+
+
+def _resolve_qgemm_options(opts):
+    """Return resolved qgemm_* values from an options mapping.
+
+    Absent keys and None values are treated identically. An explicit
+    qgemm_opt_enable is used as given; only when it is unspecified is it
+    derived from whether any tuning key is specified. When enable resolves
+    to 0, every tuning key is discarded (set to None) without validation.
+    """
+    enable = opts.get("qgemm_opt_enable")
+    if enable is None:
+        enable = int(any(opts.get(k) is not None for k in _QGEMM_TUNING_KEYS))
+    enable = _to_int("qgemm_opt_enable", enable)
+    resolved = {"qgemm_opt_enable": enable}
+    for k in _QGEMM_TUNING_KEYS:
+        if not enable:
+            resolved[k] = None
+            continue
+        v = opts.get(k)
+        if v is None:
+            v = _QGEMM_TUNING_DEFAULTS[k]
+        resolved[k] = _check_positive_int(k, v)
+    return resolved
+
+
 @dataclass(frozen=True)
 class CPUOptions:
     debug: bool = False
@@ -383,6 +413,11 @@ class CPUOptions:
     allow_fp8e4nv: bool = False
     allowed_dot_input_precisions: Tuple[str] = ("ieee",)
     sanitize_overflow: bool = True
+    # QGEMM compile options. None means unspecified; CPUBackend.parse_options
+    # resolves them. __post_init__ performs no QGEMM derivation.
+    qgemm_opt_enable: int = None
+    qgemm_mr: int = None
+    qgemm_nr: int = None
 
     def __post_init__(self):
         pass
@@ -407,6 +442,7 @@ class CPUBackend(BaseBackend):
         args.update(
             {k: opts[k] for k in CPUOptions.__dataclass_fields__.keys() if k in opts}
         )
+        args.update(_resolve_qgemm_options(opts))
         return CPUOptions(**args)
 
     def get_codegen_implementation(self, options):
@@ -452,9 +488,9 @@ class CPUBackend(BaseBackend):
 
     def add_stages(self, stages, options, language):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
-        stages["ttsharedir"] = lambda src, metadata: _ttir_to_ttsharedir(src)
+        stages["ttsharedir"] = lambda src, metadata: _ttir_to_ttsharedir(src, options)
         stages["ttsharedir.opt"] = lambda src, metadata: _optimize_ttsharedir(src)
-        stages["vectorir"] = lambda src, metadata: _ttsharedir_to_vectorir(src)
+        stages["vectorir"] = lambda src, metadata: _ttsharedir_to_vectorir(src, options)
         stages["llir"] = lambda src, metadata: _vectorir_to_llir(src)
         stages["llir.opt"] = lambda src, metadata: _optimize_llir(src)
         stages["obj"] = lambda src, metadata: _llir_to_bin(src, metadata)

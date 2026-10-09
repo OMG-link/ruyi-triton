@@ -1,4 +1,4 @@
-"""Integration test for Q8_0 × Q8_0 QGEMM with TRITON_ENABLE_QGEMM_OPT=1.
+"""Integration test for Q8_0 × Q8_0 QGEMM with qgemm_opt_enable=1.
 
 Verifies that the QGEMM multi-level tiling optimization produces numerically
 correct results by comparing Triton kernel output against a PyTorch reference
@@ -10,9 +10,6 @@ implementation. The test exercises the full compilation pipeline including:
 
 import os
 
-# Enable QGEMM optimization before any triton imports to ensure the flag
-# is picked up during module initialization and compilation.
-os.environ["TRITON_ENABLE_QGEMM_OPT"] = "1"
 
 # Force recompilation so the QGEMM tiling pass is exercised regardless of cache state.
 os.environ["TRITON_ALWAYS_COMPILE"] = "1"
@@ -187,18 +184,19 @@ def test_q80_q80_qgemm_tiling(device, M, N, K, T):
     q80_q80_canonicalized[grid](
         a_q, a_d, w_q, w_d, out,
         M=M, N=N, K=K, T=T,
+        qgemm_opt_enable=1,
     )
 
     # Verify numerical correctness
     max_abs_diff = (out - ref).abs().max().item()
     assert max_abs_diff < 1e-2, (
-        f"Numerical mismatch with TRITON_ENABLE_QGEMM_OPT=1: "
+        f"Numerical mismatch with qgemm_opt_enable=1: "
         f"max_abs_diff={max_abs_diff:.6g} (threshold=1e-2) "
         f"for M={M}, N={N}, K={K}, T={T}"
     )
 
     # Also check with torch.allclose for relative tolerance
     assert torch.allclose(out, ref, atol=1e-2, rtol=1e-2), (
-        f"torch.allclose failed with TRITON_ENABLE_QGEMM_OPT=1 "
+        f"torch.allclose failed with qgemm_opt_enable=1 "
         f"for M={M}, N={N}, K={K}, T={T}"
     )
