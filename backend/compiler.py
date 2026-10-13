@@ -178,6 +178,8 @@ def _build_vectorir_passes(options):
     if options.qgemm_opt_enable:
         passes.append("--qgemm-simplify-dim-transforms")
         passes.append("--qgemm-recognize")
+        passes.append(
+            f"--qgemm-decompress-coupling=decompress={options.decompress}")
         passes.append("--qgemm-tiling=tile-m=32 tile-n=32")
         passes.append(
             f"--qgemm-tiling=tile-m={options.qgemm_mr} tile-n={options.qgemm_nr}"
@@ -353,8 +355,10 @@ def _llir_to_bin(llir: str, metadata):
 
 
 # Tuning options whose specification implies qgemm_opt_enable=1.
-_QGEMM_TUNING_KEYS = ("qgemm_mr", "qgemm_nr")
-_QGEMM_TUNING_DEFAULTS = {"qgemm_mr": 4, "qgemm_nr": 4}
+_QGEMM_TUNING_KEYS = ("qgemm_mr", "qgemm_nr", "decompress")
+_QGEMM_TUNING_DEFAULTS = {"qgemm_mr": 4, "qgemm_nr": 4, "decompress": "pre"}
+# Tuning keys taking one of a fixed set of string values.
+_QGEMM_TUNING_CHOICES = {"decompress": ("on-the-fly", "pre")}
 
 
 def _to_int(name, v):
@@ -368,6 +372,14 @@ def _check_positive_int(name, v):
     """Return v if it is a positive int (bool excluded); raise otherwise."""
     if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
         raise ValueError(f"{name} must be a positive integer, got {v!r}")
+    return v
+
+
+def _check_choice(name, v, choices):
+    """Return v if it is one of choices; raise naming every valid value."""
+    if not isinstance(v, str) or v not in choices:
+        raise ValueError(
+            f"{name} must be one of {', '.join(choices)}, got {v!r}")
     return v
 
 
@@ -391,7 +403,10 @@ def _resolve_qgemm_options(opts):
         v = opts.get(k)
         if v is None:
             v = _QGEMM_TUNING_DEFAULTS[k]
-        resolved[k] = _check_positive_int(k, v)
+        if k in _QGEMM_TUNING_CHOICES:
+            resolved[k] = _check_choice(k, v, _QGEMM_TUNING_CHOICES[k])
+        else:
+            resolved[k] = _check_positive_int(k, v)
     return resolved
 
 
@@ -418,6 +433,7 @@ class CPUOptions:
     qgemm_opt_enable: int = None
     qgemm_mr: int = None
     qgemm_nr: int = None
+    decompress: str = None
 
     def __post_init__(self):
         pass
