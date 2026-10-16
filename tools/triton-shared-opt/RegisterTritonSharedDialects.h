@@ -23,6 +23,7 @@
 #include "triton-shared/Dialect/TritonTilingExt/IR/TritonTilingExtDialect.h"
 #include "triton-shared/Transform/AddLLVMDebugInfo/Passes.h"
 #include "triton-shared/Transform/DecomposeHighLevelOps/Passes.h"
+#include "triton-shared/Transform/MarkNoAliasArgs/Passes.h"
 
 #include "mlir/InitAllPasses.h"
 
@@ -40,6 +41,7 @@ inline void registerTritonSharedDialects(mlir::DialectRegistry &registry) {
   mlir::triton::registerStructuredToMemrefPasses();
   mlir::triton::registerAddLLVMDebugInfoPass();
   mlir::triton::registerDecomposeHighLevelOpsPass();
+  mlir::triton::registerMarkNoAliasArgsPass();
 
   // TODO: register Triton & TritonGPU passes
   registry.insert<

@@ -66,6 +66,11 @@ def _build_ttsharedir_passes(options):
         print("Building with sanitizer support...")
         passes.append("--add-llvm-debug-info")
 
+    # The user guarantees no two pointer arguments overlap; mark them before
+    # any lowering so the attribute travels with the arguments downstream.
+    if options.no_alias:
+        passes.append("--mark-noalias-args")
+
     if options.qgemm_opt_enable:
         passes.append("--decompose-high-level-ops")
 
@@ -434,6 +439,9 @@ class CPUOptions:
     qgemm_mr: int = None
     qgemm_nr: int = None
     decompress: str = None
+    # User guarantee that no two pointer arguments refer to overlapping
+    # memory. Trusted, not checked; independent of qgemm_opt_enable.
+    no_alias: bool = False
 
     def __post_init__(self):
         pass
@@ -459,6 +467,10 @@ class CPUBackend(BaseBackend):
             {k: opts[k] for k in CPUOptions.__dataclass_fields__.keys() if k in opts}
         )
         args.update(_resolve_qgemm_options(opts))
+        no_alias = opts.get("no_alias", False)
+        if not isinstance(no_alias, bool):
+            raise ValueError(f"no_alias must be a bool, got {no_alias!r}")
+        args["no_alias"] = no_alias
         return CPUOptions(**args)
 
     def get_codegen_implementation(self, options):

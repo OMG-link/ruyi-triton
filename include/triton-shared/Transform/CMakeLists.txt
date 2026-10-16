@@ -1,2 +1,3 @@
 add_subdirectory(AddLLVMDebugInfo)
 add_subdirectory(DecomposeHighLevelOps)
+add_subdirectory(MarkNoAliasArgs)
