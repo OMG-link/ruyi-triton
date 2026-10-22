@@ -316,8 +316,12 @@ llvm::SmallVector<OpFoldResult> getMixedStridesForMemref(OpType op,
                                                          OpBuilder &b) {
   llvm::SmallVector<OpFoldResult> strides;
   auto accumulate = 1;
-  for (auto [size, stride] :
-       llvm::reverse(llvm::zip(op.getSizes(), op.getMixedStrides()))) {
+  // Bind the mixed strides to a local: `llvm::reverse` over a `zip` of a
+  // temporary leaves the iterators pointing into the destroyed temporary,
+  // which is a use-after-free once the strides no longer fit inline storage.
+  auto sizes = op.getSizes();
+  SmallVector<OpFoldResult> mixedStrides = op.getMixedStrides();
+  for (auto [size, stride] : llvm::reverse(llvm::zip(sizes, mixedStrides))) {
     auto strideIntAttr = getIntAttr(stride);
     if (size == 1 && strideIntAttr && strideIntAttr.value() == 0) {
       strides.push_back(b.getIndexAttr(accumulate));
