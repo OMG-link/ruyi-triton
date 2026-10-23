@@ -92,12 +92,15 @@ module {
 // CHECK:             linalg.yield [[VAR_22_5_]] : !tt.ptr<f32>
 // CHECK:           } -> tensor<512x!tt.ptr<f32>>
 // CHECK-DAG:       [[LOAD_VAR_14_MEM_:%.+]] = tt.load [[VAR_14_]] : tensor<512x256x!tt.ptr<f32>>
-// CHECK-DAG:       [[VAR_19_:%.+]] = tensor.empty() : tensor<512xf32>
-// CHECK:           [[VAR_20_:%.+]] = linalg.fill ins([[CST_0_dot_000000_]] : f32) outs([[VAR_19_]] : tensor<512xf32>) -> tensor<512xf32>
-// CHECK:           [[VAR_reduced_:%.+]] = linalg.reduce ins([[LOAD_VAR_14_MEM_]] : tensor<512x256xf32>) outs([[VAR_20_]] : tensor<512xf32>) dimensions = [1]
+// CHECK-DAG:       [[VAR_19_:%.+]] = tensor.empty() : tensor<256x512xf32>
+// CHECK-NOT: separator of consecutive DAGs
+// CHECK-DAG:       [[VAR_transposed_:%.+]] = linalg.transpose ins([[LOAD_VAR_14_MEM_]] : tensor<512x256xf32>) outs([[VAR_19_]] : tensor<256x512xf32>) permutation = [1, 0]
+// CHECK-DAG:       [[VAR_20_:%.+]] = tensor.empty() : tensor<512xf32>
+// CHECK:           [[VAR_21_:%.+]] = linalg.fill ins([[CST_0_dot_000000_]] : f32) outs([[VAR_20_]] : tensor<512xf32>) -> tensor<512xf32>
+// CHECK:           [[VAR_reduced_:%.+]] = linalg.reduce ins([[VAR_transposed_]] : tensor<256x512xf32>) outs([[VAR_21_]] : tensor<512xf32>) dimensions = [0]
 // CHECK:             ([[in_]]: f32, [[in_]]it: f32) {
-// CHECK:               [[VAR_21_6_:%.+]] = arith.addf [[in_]], [[in_]]it : f32
-// CHECK:               linalg.yield [[VAR_21_6_]] : f32
+// CHECK:               [[VAR_22_6_:%.+]] = arith.addf [[in_]], [[in_]]it : f32
+// CHECK:               linalg.yield [[VAR_22_6_]] : f32
 // CHECK:             }
 // CHECK:           tt.store [[VAR_17_]], [[VAR_reduced_]] : tensor<512x!tt.ptr<f32>>
 // CHECK:           return

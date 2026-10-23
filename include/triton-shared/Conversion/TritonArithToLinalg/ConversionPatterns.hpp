@@ -1146,13 +1146,14 @@ struct MatmulConverter : public OpConversionPattern<triton::DotOp> {
 
 struct ReduceConverter : public OpConversionPattern<triton::ReduceOp> {
 
-  // `transposeToRank0` is accepted for API compatibility and ignored: the
-  // reduction is always emitted on its source axis.
-  ReduceConverter(MLIRContext *context, bool /*transposeToRank0*/ = true,
+  ReduceConverter(MLIRContext *context, bool transposeToRank0 = true,
                   PatternBenefit benefit = 1)
-      : OpConversionPattern(context, benefit) {}
+      : OpConversionPattern(context, benefit),
+        transposeToRank0(transposeToRank0) {}
 
 private:
+  bool transposeToRank0;
+
   llvm::SmallVector<Operation *> getRedOps(triton::ReduceOp redOp) const {
     auto reduceBlock = redOp.getBody();
     return llvm::map_to_vector(reduceBlock->without_terminator(),
@@ -1316,8 +1317,32 @@ private:
     auto isVectorReduce = (rank == 1);
     auto resType = op.getResult().front().getType();
 
-    // The reduction is emitted on its source axis; the downstream lowering
-    // decides any transposition it needs.
+    // For now we are transposing reductions from Triton Shared as an
+    // optimization. This should not be the job of Triton Shared so moving
+    // forward this will be removed.
+    if (transposeToRank0) {
+      if (!isVectorReduce && axis != 0) {
+        SmallVector<int32_t> order;
+        order.reserve(rank);
+        order.push_back(axis);
+        for (int i = 0; i < rank; ++i) {
+          if (i != axis) {
+            order.push_back(i);
+          }
+        }
+        for (Value &operand : operands) {
+          operand = getTransposedValue(operand, loc, rewriter, order);
+        }
+        axis = 0;
+      }
+    } else {
+      if (axis == rank - 1 && !isVectorReduce) {
+        for (Value &operand : operands) {
+          operand = getTransposedValue(operand, loc, rewriter);
+        }
+        axis = rank - 2;
+      }
+    }
 
     // Determine if we can use a simple initialization with linalg.fill
     bool isSimpleReduction =
