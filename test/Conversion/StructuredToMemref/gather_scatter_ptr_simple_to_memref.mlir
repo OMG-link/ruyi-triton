@@ -7,8 +7,8 @@
 // CHECK-SAME:                               %[[VAL_0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>,
 // CHECK-SAME:                               %[[VAL_1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<i32>,
 // CHECK-SAME:                               %[[VAL_2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>) attributes {noinline = false} {
-// CHECK:           %[[BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_0]] : !tt.ptr<f32> to memref<*xf32>
-// CHECK:           %[[INDEX_BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_1]] : !tt.ptr<i32> to memref<*xi32>
+// CHECK-DAG:       %[[BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_0]] : !tt.ptr<f32> to memref<*xf32>
+// CHECK-DAG:       %[[INDEX_BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_1]] : !tt.ptr<i32> to memref<*xi32>
 // CHECK:           %[[SOURCE_LENGTH:.*]] = memref.dim %[[BASE]], %{{.*}} : memref<*xf32>
 // CHECK:           %[[SOURCE_MEMREF:.*]] = memref.reinterpret_cast %[[BASE]] to offset: [0], sizes: [%[[SOURCE_LENGTH]]], strides: [1] : memref<*xf32> to memref<?xf32>
 // CHECK:           %[[SOURCE_TENSOR:.*]] = bufferization.to_tensor %[[SOURCE_MEMREF]] restrict : memref<?xf32> to tensor<?xf32>
@@ -37,8 +37,8 @@ module {
     %2 = arith.muli %1, %cst_0 : tensor<8xi32>
     %3 = arith.remsi %2, %cst_1 : tensor<8xi32>
     %4 = arith.muli %3, %cst : tensor<8xi32>
-    %5 = tts.make_gather_scatter_tptr %arg0 to sizes: [8, 8] gather_scatter_dim: 0 gather_scatter_offset: %4, strides: [1, 1], offsets: [0, 0] : tensor<8xi32> <f32> to !tt.ptr<tensor<8x8xf32>>
-    %6 = "tts.load"(%5) <{operandSegmentSizes = array<i32: 1, 0, 0>, static_mask_dims = array<i64>}> : (!tt.ptr<tensor<8x8xf32>>) -> tensor<8x8xf32>
+    %5 = tts.make_gather_scatter_tptr %arg0 to sizes: [8, 8] gather_scatter_dim: 0 gather_scatter_offset: %4, strides: [1, 1], offsets: [0, 0] : tensor<8xi32> <f32> to tensor<8x8x!tt.ptr<f32>>
+    %6 = "tts.load"(%5) <{operandSegmentSizes = array<i32: 1, 0, 0>, static_mask_dims = array<i64>}> : (tensor<8x8x!tt.ptr<f32>>) -> tensor<8x8xf32>
     %7 = tts.make_tptr %arg2 to sizes: [8, 8], strides: [%c8, 1], offsets: [0, 0], shape: [0, 0], order: [] : <f32> to tensor<8x8x!tt.ptr<f32>>
     "tts.store"(%7, %6) <{static_mask_dims = array<i64>}> : (tensor<8x8x!tt.ptr<f32>>, tensor<8x8xf32>) -> ()
     tt.return

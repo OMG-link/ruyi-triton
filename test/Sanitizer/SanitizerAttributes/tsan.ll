@@ -1,5 +1,5 @@
 ; REQUIRES: triton-san
-; RUN: opt -load-pass-plugin %sanitizer_dir/libSanitizerAttributes.so -passes=sanitizer-attributes -sanitizer-type=tsan -S %s | FileCheck %s
+; RUN: opt -load-pass-plugin %sanitizer_dir/libSanitizerAttributes.so -passes="sanitizer-attributes<tsan>" -S %s | FileCheck %s
 
 ; ModuleID = 'LLVMDialectModule'
 source_filename = "LLVMDialectModule"

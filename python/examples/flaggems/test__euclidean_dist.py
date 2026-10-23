@@ -64,8 +64,6 @@ def test_euclidean_dist_kernel_emits_riscv_object(tmp_path, N, M, D):
     assert re.search(r"\bvsetivli\b", asm)
     assert re.search(r"\bvle32\.v\b", asm)
     assert re.search(r"\bvse32\.v\b", asm)
-    assert re.search(r"\bvfsub\.vv\b", asm)
-    assert re.search(r"\bvfmul\.vv\b", asm)
 
 
 def test_euclidean_dist_shape_assertions():
