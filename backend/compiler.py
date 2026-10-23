@@ -303,6 +303,23 @@ def _enable_fadd_reassociation(llir: str) -> str:
     return _FADD_INSTRUCTION.sub(add_flag, llir)
 
 
+def _riscv_vector_bits_args() -> list:
+    """VLEN assumptions for native RISC-V opt/llc.
+
+    Pinning the maximum VLEN below the hardware's makes LLVM size vector stack
+    slots too small: a whole-register spill on a wider core then overwrites
+    the saved registers next to it. Only the RVV minimum of 128 bits is
+    assumed by default; TRITON_RISCV_VLEN pins the exact VLEN of the target
+    (256 on the SpacemiT K1) when it is known.
+    """
+    vlen = os.getenv("TRITON_RISCV_VLEN", "").strip()
+    if not vlen:
+        return ["-riscv-v-vector-bits-min=128"]
+    if not vlen.isdigit() or int(vlen) < 128 or int(vlen) & (int(vlen) - 1):
+        raise ValueError("TRITON_RISCV_VLEN must be a power of two >= 128")
+    return [f"-riscv-v-vector-bits-min={vlen}", f"-riscv-v-vector-bits-max={vlen}"]
+
+
 def _optimize_llir(llir: str, options=None):
     # llc's -O3 controls code-generation optimizations but does not run the
     # target-aware LLVM middle-end pipeline.  In particular, scalar linalg
@@ -392,8 +409,7 @@ def _optimize_llir(llir: str, options=None):
                 [
                     "-mtriple=riscv64-unknown-linux-gnu",
                     f"-mattr={DEFAULT_LLC_FEATURES}",
-                    "-riscv-v-vector-bits-min=128",
-                    "-riscv-v-vector-bits-max=128",
+                    *_riscv_vector_bits_args(),
                 ]
             )
         command.extend(["-S", src_path, "-o", dst_path])
@@ -636,8 +652,7 @@ def _llir_to_bin(llir: str, metadata, options=None):
                 llc_args.extend(
                     [
                         f"-mattr={DEFAULT_LLC_FEATURES}",
-                        "-riscv-v-vector-bits-min=128",
-                        "-riscv-v-vector-bits-max=128",
+                        *_riscv_vector_bits_args(),
                     ]
                 )
             elif platform.machine() in {"x86_64", "AMD64"}:
