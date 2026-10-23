@@ -28,6 +28,9 @@ include "triton-shared/Dialect/TritonTilingExt/IR/TritonTilingExtInterfaces.td"
 //===----------------------------------------------------------------------===//
 
 def TritonTilingExt_Dialect : Dialect {
+  // LLVM 24 enables strict properties in assembly formats by default;
+  // keep inherent attributes in attr-dict as before.
+  let useStrictPropertiesInAssemblyFormat = 0;
   let name = "ttx";
   let cppNamespace = "::mlir::ttx";
 }

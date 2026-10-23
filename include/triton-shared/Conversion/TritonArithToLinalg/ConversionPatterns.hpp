@@ -1146,14 +1146,13 @@ struct MatmulConverter : public OpConversionPattern<triton::DotOp> {
 
 struct ReduceConverter : public OpConversionPattern<triton::ReduceOp> {
 
-  ReduceConverter(MLIRContext *context, bool transposeToRank0 = true,
+  // `transposeToRank0` is accepted for API compatibility and ignored: the
+  // reduction is always emitted on its source axis.
+  ReduceConverter(MLIRContext *context, bool /*transposeToRank0*/ = true,
                   PatternBenefit benefit = 1)
-      : OpConversionPattern(context, benefit),
-        transposeToRank0(transposeToRank0) {}
+      : OpConversionPattern(context, benefit) {}
 
 private:
-  bool transposeToRank0;
-
   llvm::SmallVector<Operation *> getRedOps(triton::ReduceOp redOp) const {
     auto reduceBlock = redOp.getBody();
     return llvm::map_to_vector(reduceBlock->without_terminator(),

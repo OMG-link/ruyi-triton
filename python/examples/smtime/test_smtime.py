@@ -68,13 +68,13 @@ def test_user_kernel_warmup_emits_riscv_ime_object(tmp_path):
     )
     assert "FUNC    GLOBAL DEFAULT" in symbols
     assert "smtime_i8_matmul" in symbols
-    assert "xsmtime" in symbols
+    assert "xsmtvdot" in symbols
 
     asm = subprocess.check_output(
         [get_llvm_bin_path("llvm-objdump"), "-d", str(obj_path)], text=True
     )
     assert re.search(r"<smtime_i8_matmul>:", asm)
-    assert len(re.findall(r"\bvmadot\b", asm)) == 1
+    assert len(re.findall(r"\bsmt\.vmadot\b", asm)) == 1
     assert "vsetvli" in asm
     assert "vle8.v" in asm
     assert "vle32.v" in asm

@@ -7,6 +7,9 @@ include "triton/Dialect/Triton/IR/TritonTypes.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 def Triton_Structured_Dialect : Dialect {
+  // LLVM 24 enables strict properties in assembly formats by default;
+  // keep inherent attributes in attr-dict as before.
+  let useStrictPropertiesInAssemblyFormat = 0;
   let name = "tts";
 
   let cppNamespace = "::mlir::tts";

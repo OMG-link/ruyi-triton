@@ -130,7 +130,7 @@ def _ttsharedir_to_llir(ttsharedir: str):
             # ---------------------------------------------------------------
             # IME path: Triton-Shared MLIR → buddy-mlir IME dialect → LLVM IR
             # Lowers linalg.matmul (f16) to ime.vfmadot via buddy-mlir passes,
-            # then cross-compiles to a RISC-V ELF object with +xsmtime.
+            # then cross-compiles to a RISC-V ELF object with +xsmtvdot (K1 IME).
             # ---------------------------------------------------------------
             ime_lowering_passes = [
                 # Bufferize tensor ops before IME lowering
@@ -606,7 +606,7 @@ def _llir_to_bin(llir: str, metadata, options=None):
             buddy_llc_path = _get_buddy_llc_path()
             toolchain = RiscvToolchain.from_env()
             toolchain = replace(
-                toolchain, llc_features=f"{toolchain.llc_features},+xsmtime"
+                toolchain, llc_features=f"{toolchain.llc_features},+xsmtvdot"
             )
             subprocess.check_call(
                 toolchain.llc_command(buddy_llc_path, src_path, dst_path)

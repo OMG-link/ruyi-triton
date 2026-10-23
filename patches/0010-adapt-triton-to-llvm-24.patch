@@ -1,0 +1,222 @@
+diff --git a/include/triton/Dialect/Gluon/IR/GluonDialect.td b/include/triton/Dialect/Gluon/IR/GluonDialect.td
+index ce33863baa..60db3f9ce0 100644
+--- a/include/triton/Dialect/Gluon/IR/GluonDialect.td
++++ b/include/triton/Dialect/Gluon/IR/GluonDialect.td
+@@ -4,6 +4,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def Gluon_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "gluon";
+   let cppNamespace = "::mlir::triton::gluon";
+   let description = [{
+diff --git a/include/triton/Dialect/Triton/IR/TritonDialect.td b/include/triton/Dialect/Triton/IR/TritonDialect.td
+index 702bf2df1d..80ef93cc58 100644
+--- a/include/triton/Dialect/Triton/IR/TritonDialect.td
++++ b/include/triton/Dialect/Triton/IR/TritonDialect.td
+@@ -4,6 +4,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def Triton_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "tt";
+ 
+   let cppNamespace = "::mlir::triton";
+diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
+index 556489b089..615286a7c5 100644
+--- a/include/triton/Dialect/Triton/IR/TritonOps.td
++++ b/include/triton/Dialect/Triton/IR/TritonOps.td
+@@ -1095,6 +1095,7 @@ def CallOp : TT_Op<"call", [CallOpInterface, /*MemRefsNormalizable, */DeclareOpI
+ 
+ def FuncOp : TT_Op<"func", [
+     AffineScope, AutomaticAllocationScope, CallableOpInterface,
++    SymbolName, SymbolVisibility,
+     FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface,
+     HasParent<"ModuleOp">
+ ]> {
+diff --git a/include/triton/Dialect/TritonGPU/IR/TritonGPUDialect.td b/include/triton/Dialect/TritonGPU/IR/TritonGPUDialect.td
+index 7863c089a1..9b8efbf29a 100644
+--- a/include/triton/Dialect/TritonGPU/IR/TritonGPUDialect.td
++++ b/include/triton/Dialect/TritonGPU/IR/TritonGPUDialect.td
+@@ -4,6 +4,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def TritonGPU_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "ttg";
+ 
+   let cppNamespace = "::mlir::triton::gpu";
+diff --git a/include/triton/Dialect/TritonInstrument/IR/TritonInstrumentDialect.td b/include/triton/Dialect/TritonInstrument/IR/TritonInstrumentDialect.td
+index 6a7f3eed62..82b0604ed1 100644
+--- a/include/triton/Dialect/TritonInstrument/IR/TritonInstrumentDialect.td
++++ b/include/triton/Dialect/TritonInstrument/IR/TritonInstrumentDialect.td
+@@ -4,6 +4,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def TritonInstrument_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "tti";
+   let cppNamespace = "::mlir::triton::instrument";
+ }
+diff --git a/include/triton/Dialect/TritonNvidiaGPU/IR/TritonNvidiaGPUDialect.td b/include/triton/Dialect/TritonNvidiaGPU/IR/TritonNvidiaGPUDialect.td
+index 25d1a0ffb1..7104db4ce9 100644
+--- a/include/triton/Dialect/TritonNvidiaGPU/IR/TritonNvidiaGPUDialect.td
++++ b/include/triton/Dialect/TritonNvidiaGPU/IR/TritonNvidiaGPUDialect.td
+@@ -25,6 +25,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def TritonNvidiaGPU_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "ttng";
+ 
+   let cppNamespace = "::mlir::triton::nvidia_gpu";
+diff --git a/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp b/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp
+index 0eaa081d50..a360094010 100644
+--- a/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp
++++ b/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp
+@@ -287,6 +287,7 @@ struct ElementwiseInlineAsmOpConversion
+                            /*constraints=*/op.getConstraints(),
+                            /*has_side_effects=*/!op.getPure(),
+                            /*is_align_stack=*/false, LLVM::TailCallKind::None,
++                           /*convergent=*/false,
+                            /*asm_dialect=*/
+                            LLVM::AsmDialectAttr::get(rewriter.getContext(),
+                                                      LLVM::AsmDialect::AD_ATT),
+diff --git a/lib/Target/LLVMIR/LLVMPasses.h b/lib/Target/LLVMIR/LLVMPasses.h
+index 1dcdb2992c..8859b0f6c0 100644
+--- a/lib/Target/LLVMIR/LLVMPasses.h
++++ b/lib/Target/LLVMIR/LLVMPasses.h
+@@ -7,7 +7,8 @@ namespace llvm {
+ // Pass to pre-process LLVM IR before optimization and break up phi of struct.
+ // Breaking up those phis into elementary types allows better optimizations
+ // downstream.
+-struct BreakStructPhiNodesPass : PassInfoMixin<BreakStructPhiNodesPass> {
++struct BreakStructPhiNodesPass
++    : OptionalPassInfoMixin<BreakStructPhiNodesPass> {
+   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+ 
+   static StringRef name() { return "BreakStructPhiNodesPass"; }
+diff --git a/python/src/llvm.cc b/python/src/llvm.cc
+index d5ed3e35bf..334e68edfc 100644
+--- a/python/src/llvm.cc
++++ b/python/src/llvm.cc
+@@ -45,7 +45,8 @@
+ namespace py = pybind11;
+ 
+ namespace llvm {
+-struct BreakStructPhiNodesPass : PassInfoMixin<BreakStructPhiNodesPass> {
++struct BreakStructPhiNodesPass
++    : OptionalPassInfoMixin<BreakStructPhiNodesPass> {
+   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+   static StringRef name() { return "BreakStructPhiNodesPass"; }
+ };
+@@ -137,8 +138,9 @@ createTargetMachine(llvm::Module *module, std::string proc,
+   auto target = llvm::TargetRegistry::lookupTarget(moduleTriple, error);
+   llvm::TargetOptions opt;
+   bool disableLLVMOpt = mlir::triton::tools::getBoolEnv("DISABLE_LLVM_OPT");
+-  if (enable_fp_fusion)
+-    opt.AllowFPOpFusion = llvm::FPOpFusion::Fast;
++  // LLVM 24 removed TargetOptions::AllowFPOpFusion; FP contraction is
++  // controlled by the `contract` fast-math flags in the IR instead.
++  (void)enable_fp_fusion;
+   opt.TrapUnreachable = true;
+   opt.MCOptions.AsmVerbose = true;
+   opt.MCOptions.PreserveAsmComments = true;
+@@ -701,7 +703,7 @@ void init_triton_llvm(py::module &&m) {
+           // registry name "vector-combine".
+           const StringRef kVectorCombinePassName = "VectorCombinePass";
+           passInstrCb.registerShouldRunOptionalPassCallback(
+-              [kVectorCombinePassName](StringRef passName, Any) {
++              [kVectorCombinePassName](StringRef passName, IRUnitRef) {
+                 return passName != kVectorCombinePassName;
+               });
+           enablePassInstrumentation = true;
+@@ -749,7 +751,7 @@ void init_triton_llvm(py::module &&m) {
+         if (!pluginFile.empty()) {
+           // TODO: Add some logging here that we inserted a pass into the LLVM
+           // pass pipeline
+-          auto passPlugin = llvm::PassPlugin::Load(pluginFile);
++          auto passPlugin = llvm::PassPlugin::load(pluginFile);
+           if (!passPlugin) {
+             llvm::Error Err = passPlugin.takeError();
+             std::string ErrMsg =
+diff --git a/third_party/amd/include/Dialect/TritonAMDGPU/IR/TritonAMDGPUDialect.td b/third_party/amd/include/Dialect/TritonAMDGPU/IR/TritonAMDGPUDialect.td
+index a8ebb676b9..5583c18bd8 100644
+--- a/third_party/amd/include/Dialect/TritonAMDGPU/IR/TritonAMDGPUDialect.td
++++ b/third_party/amd/include/Dialect/TritonAMDGPU/IR/TritonAMDGPUDialect.td
+@@ -27,6 +27,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def TritonAMDGPU_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "amdg";
+   let cppNamespace = "::mlir::triton::amdgpu";
+ 
+diff --git a/third_party/nvidia/include/Dialect/NVGPU/IR/NVGPUDialect.td b/third_party/nvidia/include/Dialect/NVGPU/IR/NVGPUDialect.td
+index 95ad790379..42673749ec 100644
+--- a/third_party/nvidia/include/Dialect/NVGPU/IR/NVGPUDialect.td
++++ b/third_party/nvidia/include/Dialect/NVGPU/IR/NVGPUDialect.td
+@@ -25,6 +25,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def NVGPU_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "nvg";
+   let cppNamespace = "::mlir::triton::nvgpu";
+ 
+diff --git a/third_party/nvidia/include/Dialect/NVWS/IR/NVWSDialect.td b/third_party/nvidia/include/Dialect/NVWS/IR/NVWSDialect.td
+index 92cd3718b0..e377e73103 100644
+--- a/third_party/nvidia/include/Dialect/NVWS/IR/NVWSDialect.td
++++ b/third_party/nvidia/include/Dialect/NVWS/IR/NVWSDialect.td
+@@ -25,6 +25,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def NVWS_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "nvws";
+   let cppNamespace = "::mlir::triton::nvws";
+ 
+diff --git a/third_party/proton/Dialect/include/Dialect/Proton/IR/ProtonDialect.td b/third_party/proton/Dialect/include/Dialect/Proton/IR/ProtonDialect.td
+index 245f2e09a2..fac150b741 100644
+--- a/third_party/proton/Dialect/include/Dialect/Proton/IR/ProtonDialect.td
++++ b/third_party/proton/Dialect/include/Dialect/Proton/IR/ProtonDialect.td
+@@ -4,6 +4,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def Proton_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "proton";
+   let cppNamespace = "::mlir::triton::proton";
+ 
+diff --git a/third_party/proton/Dialect/include/Dialect/ProtonGPU/IR/ProtonGPUDialect.td b/third_party/proton/Dialect/include/Dialect/ProtonGPU/IR/ProtonGPUDialect.td
+index c63baa3856..6cc9c372ea 100644
+--- a/third_party/proton/Dialect/include/Dialect/ProtonGPU/IR/ProtonGPUDialect.td
++++ b/third_party/proton/Dialect/include/Dialect/ProtonGPU/IR/ProtonGPUDialect.td
+@@ -4,6 +4,9 @@
+ include "mlir/IR/OpBase.td"
+ 
+ def ProtonGPU_Dialect : Dialect {
++  // LLVM 24 enables strict properties in assembly formats by default;
++  // keep inherent attributes in attr-dict as before.
++  let useStrictPropertiesInAssemblyFormat = 0;
+   let name = "proton_gpu";
+   let cppNamespace = "::mlir::triton::proton::gpu";
+ 
