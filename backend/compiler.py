@@ -133,7 +133,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
             # then cross-compiles to a RISC-V ELF object with +xsmtvdot (K1 IME).
             # ---------------------------------------------------------------
             ime_lowering_passes = [
-                *_tile_to_vector_args(options),
+                *_tile_to_vector_args(options, ime=True),
                 # Bufferize tensor ops before IME lowering
                 "--empty-tensor-to-alloc-tensor",
                 "--one-shot-bufferize=allow-return-allocs-from-loops=true",
@@ -358,17 +358,22 @@ def _set_llvm_target_args(options) -> list:
     return [f"--set-llvm-target=triple={triple} chip={cpu} features={features}"]
 
 
-def _tile_to_vector_args(options) -> list:
+def _tile_to_vector_args(options, ime=False) -> list:
     """Keep register-sized tensor tiles in vector registers.
 
     `--convert-tile-tensor-to-vector` sizes tiles from the #llvm.target
     attribute, so it runs whenever a target is attached (RISC-V and x86).
+    The IME pipeline also turns K1-sized matmul(A, transpose(B)) into
+    value-level vmadot tile dots, which its `--lower-ime` lowers.
     TRITON_RISCV_REMARKS=<regex> prints the optimization remarks whose
     category matches, e.g. `tile-to-vector`; remarks are silent otherwise.
     """
     if _target(options) is None:
         return []
-    return ["--convert-tile-tensor-to-vector", "--canonicalize", "--cse"]
+    convert = "--convert-tile-tensor-to-vector"
+    if ime:
+        convert += "=ime-tile-dot=true"
+    return [convert, "--canonicalize", "--cse"]
 
 
 def _remarks_args() -> list:
