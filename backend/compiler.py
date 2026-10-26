@@ -116,7 +116,7 @@ def _optimize_ttsharedir(ttsharedir: str):
     return ttsharedir
 
 
-def _ttsharedir_to_llir(ttsharedir: str):
+def _ttsharedir_to_llir(ttsharedir: str, options=None):
     with tempfile.TemporaryDirectory() as tmpdir:
         ttshared_path = os.path.join(tmpdir, "ttshared.mlir")
         ime_pre_llvm_path = os.path.join(tmpdir, "ime-pre-llvm.mlir")
@@ -176,6 +176,7 @@ def _ttsharedir_to_llir(ttsharedir: str):
                     [
                         buddy_opt_path,
                         ttshared_path,
+                        *_set_llvm_target_args(options),
                         *ime_lowering_passes,
                         "--mlir-print-debuginfo",
                         "-o",
@@ -200,6 +201,7 @@ def _ttsharedir_to_llir(ttsharedir: str):
                 [
                     buddy_opt_path,
                     buddy_input_path,
+                    *_set_llvm_target_args(options),
                     *buddy_passes,
                     "--mlir-print-debuginfo",
                     "-o",
@@ -225,6 +227,7 @@ def _ttsharedir_to_llir(ttsharedir: str):
                 [
                     buddy_opt_path,
                     ttshared_path,
+                    *_set_llvm_target_args(options),
                     # Note: eliminate-empty-tensors fails when there are multiple func.return ops
                     # in a single kernel which are the results of early returns.
                     # See python/examples/test_early_return.py for examples.
@@ -303,18 +306,62 @@ def _enable_fadd_reassociation(llir: str) -> str:
     return _FADD_INSTRUCTION.sub(add_flag, llir)
 
 
-def _riscv_vector_bits_args() -> list:
+@functools.lru_cache()
+def _get_host_cpu() -> str:
+    """LLVM's name for the host CPU, e.g. spacemit-x60 on the SpacemiT K1."""
+    output = subprocess.check_output(
+        [_get_llvm_bin_path("llc"), "--version"], text=True
+    )
+    match = re.search(r"Host CPU:\s*(\S+)", output)
+    return match.group(1) if match else "generic"
+
+
+def _riscv_target(options):
+    """(triple, cpu, features) of a RISC-V target, or None for a non-RISC-V host.
+
+    The target is stated, never guessed: an explicit triple (cross compilation
+    and the IME pipeline) uses `target_cpu` and `target_features` as given,
+    and a native RISC-V build uses the host CPU LLVM detects.
+    """
+    triple = getattr(options, "target_triple", None)
+    cpu = getattr(options, "target_cpu", None) or "generic"
+    if triple:
+        return triple, cpu, getattr(options, "target_features", None) or ""
+    if platform.machine() == "riscv64":
+        return "riscv64-unknown-linux-gnu", cpu, DEFAULT_LLC_FEATURES
+    return None
+
+
+def _set_llvm_target_args(options) -> list:
+    """buddy-opt arguments that attach the target as #llvm.target."""
+    target = _riscv_target(options)
+    if target is None:
+        return []
+    triple, cpu, features = target
+    return [f"--set-llvm-target=triple={triple} chip={cpu} features={features}"]
+
+
+def _mcpu_args(options) -> list:
+    target = _riscv_target(options)
+    if target is None or target[1] == "generic":
+        return []
+    return [f"-mcpu={target[1]}"]
+
+
+def _riscv_vector_bits_args(options=None) -> list:
     """VLEN assumptions for native RISC-V opt/llc.
 
     Pinning the maximum VLEN below the hardware's makes LLVM size vector stack
     slots too small: a whole-register spill on a wider core then overwrites
-    the saved registers next to it. Only the RVV minimum of 128 bits is
-    assumed by default; TRITON_RISCV_VLEN pins the exact VLEN of the target
-    (256 on the SpacemiT K1) when it is known.
+    the saved registers next to it. The CPU's Zvl* bound, or the RVV minimum
+    of 128 bits without a CPU, is the only assumption by default;
+    TRITON_RISCV_VLEN pins the exact VLEN of the target (256 on the SpacemiT
+    K1) when it is known.
     """
     vlen = os.getenv("TRITON_RISCV_VLEN", "").strip()
     if not vlen:
-        return ["-riscv-v-vector-bits-min=128"]
+        # A named CPU brings its Zvl* bound; LLVM rejects a smaller minimum.
+        return [] if _mcpu_args(options) else ["-riscv-v-vector-bits-min=128"]
     if not vlen.isdigit() or int(vlen) < 128 or int(vlen) & (int(vlen) - 1):
         raise ValueError("TRITON_RISCV_VLEN must be a power of two >= 128")
     return [f"-riscv-v-vector-bits-min={vlen}", f"-riscv-v-vector-bits-max={vlen}"]
@@ -409,7 +456,8 @@ def _optimize_llir(llir: str, options=None):
                 [
                     "-mtriple=riscv64-unknown-linux-gnu",
                     f"-mattr={DEFAULT_LLC_FEATURES}",
-                    *_riscv_vector_bits_args(),
+                    *_mcpu_args(options),
+                    *_riscv_vector_bits_args(options),
                 ]
             )
         command.extend(["-S", src_path, "-o", dst_path])
@@ -625,6 +673,7 @@ def _llir_to_bin(llir: str, metadata, options=None):
             )
             subprocess.check_call(
                 toolchain.llc_command(buddy_llc_path, src_path, dst_path)
+                + _mcpu_args(options)
             )
         else:
             llc_path = _get_llvm_bin_path("llc")
@@ -648,11 +697,13 @@ def _llir_to_bin(llir: str, metadata, options=None):
                     llc_features=options.target_features,
                 )
                 llc_args = toolchain.llc_command(llc_path, src_path, dst_path)
+                llc_args += _mcpu_args(options)
             elif platform.machine() == "riscv64":
                 llc_args.extend(
                     [
                         f"-mattr={DEFAULT_LLC_FEATURES}",
-                        *_riscv_vector_bits_args(),
+                        *_mcpu_args(options),
+                        *_riscv_vector_bits_args(options),
                     ]
                 )
             elif platform.machine() in {"x86_64", "AMD64"}:
@@ -685,6 +736,7 @@ class CPUOptions:
     instrumentation_mode: str = ""
     target_triple: str = None
     target_features: str = None
+    target_cpu: str = None
     openmp_num_threads: int = 0
     allow_fp_reassoc: bool = False
 
@@ -720,6 +772,16 @@ class CPUBackend(BaseBackend):
             toolchain = RiscvToolchain.from_env()
             args.setdefault("target_triple", toolchain.triple)
             args.setdefault("target_features", toolchain.llc_features)
+        # The CPU names LLVM's processor entry for the target: given by the
+        # caller, the IME pipeline's K1 core, or the host on a native RISC-V
+        # build. A cross build without one is described by its features alone.
+        if not args.get("target_cpu"):
+            if os.getenv("TRITON_RISCV_MCPU"):
+                args["target_cpu"] = os.environ["TRITON_RISCV_MCPU"]
+            elif _use_ime_pipeline():
+                args["target_cpu"] = "spacemit-x60"
+            elif not args.get("target_triple") and platform.machine() == "riscv64":
+                args["target_cpu"] = _get_host_cpu()
         return CPUOptions(**args)
 
     def get_codegen_implementation(self, options):
@@ -766,7 +828,7 @@ class CPUBackend(BaseBackend):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
         stages["ttsharedir"] = lambda src, metadata: _ttir_to_ttsharedir(src)
         stages["ttsharedir.opt"] = lambda src, metadata: _optimize_ttsharedir(src)
-        stages["llir"] = lambda src, metadata: _ttsharedir_to_llir(src)
+        stages["llir"] = lambda src, metadata: _ttsharedir_to_llir(src, options)
         stages["llir.opt"] = lambda src, metadata: _optimize_llir(src, options)
         stages["obj"] = lambda src, metadata: _llir_to_bin(src, metadata, options)
 
