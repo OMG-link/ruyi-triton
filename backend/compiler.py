@@ -133,6 +133,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
             # then cross-compiles to a RISC-V ELF object with +xsmtvdot (K1 IME).
             # ---------------------------------------------------------------
             ime_lowering_passes = [
+                *_tile_to_vector_args(options),
                 # Bufferize tensor ops before IME lowering
                 "--empty-tensor-to-alloc-tensor",
                 "--one-shot-bufferize=allow-return-allocs-from-loops=true",
@@ -177,6 +178,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                         buddy_opt_path,
                         ttshared_path,
                         *_set_llvm_target_args(options),
+                    *_remarks_args(),
                         *ime_lowering_passes,
                         "--mlir-print-debuginfo",
                         "-o",
@@ -202,6 +204,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                     buddy_opt_path,
                     buddy_input_path,
                     *_set_llvm_target_args(options),
+                    *_remarks_args(),
                     *buddy_passes,
                     "--mlir-print-debuginfo",
                     "-o",
@@ -228,6 +231,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                     buddy_opt_path,
                     ttshared_path,
                     *_set_llvm_target_args(options),
+                    *_remarks_args(),
                     # Note: eliminate-empty-tensors fails when there are multiple func.return ops
                     # in a single kernel which are the results of early returns.
                     # See python/examples/test_early_return.py for examples.
@@ -238,6 +242,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                     # turns every intermediate and scalar broadcast into a
                     # separate temporary buffer.
                     "--linalg-fuse-elementwise-ops",
+                    *_tile_to_vector_args(options),
                     "--empty-tensor-to-alloc-tensor",
                     "--one-shot-bufferize=allow-return-allocs-from-loops=true",
                     "--buffer-deallocation-pipeline",
@@ -316,29 +321,59 @@ def _get_host_cpu() -> str:
     return match.group(1) if match else "generic"
 
 
-def _riscv_target(options):
-    """(triple, cpu, features) of a RISC-V target, or None for a non-RISC-V host.
+def _target(options):
+    """(triple, cpu, features) of the compilation target, or None if unknown.
 
     The target is stated, never guessed: an explicit triple (cross compilation
-    and the IME pipeline) uses `target_cpu` and `target_features` as given,
-    and a native RISC-V build uses the host CPU LLVM detects.
+    and the IME pipeline) uses `target_cpu` and `target_features` as given.
+    A native build uses the host CPU LLVM detects, which on x86 is the CPU
+    `-mcpu=native` selects for opt and llc.
     """
     triple = getattr(options, "target_triple", None)
     cpu = getattr(options, "target_cpu", None) or "generic"
     if triple:
         return triple, cpu, getattr(options, "target_features", None) or ""
-    if platform.machine() == "riscv64":
+    machine = platform.machine()
+    if machine == "riscv64":
         return "riscv64-unknown-linux-gnu", cpu, DEFAULT_LLC_FEATURES
+    if machine in {"x86_64", "AMD64"}:
+        return "x86_64-unknown-linux-gnu", _get_host_cpu(), ""
     return None
+
+
+def _riscv_target(options):
+    """(triple, cpu, features) when the target is RISC-V, else None."""
+    target = _target(options)
+    if target is None or not target[0].startswith("riscv"):
+        return None
+    return target
 
 
 def _set_llvm_target_args(options) -> list:
     """buddy-opt arguments that attach the target as #llvm.target."""
-    target = _riscv_target(options)
+    target = _target(options)
     if target is None:
         return []
     triple, cpu, features = target
     return [f"--set-llvm-target=triple={triple} chip={cpu} features={features}"]
+
+
+def _tile_to_vector_args(options) -> list:
+    """Keep register-sized tensor tiles in vector registers.
+
+    `--convert-tile-tensor-to-vector` sizes tiles from the #llvm.target
+    attribute, so it runs whenever a target is attached (RISC-V and x86).
+    TRITON_RISCV_REMARKS=<regex> prints the optimization remarks whose
+    category matches, e.g. `tile-to-vector`; remarks are silent otherwise.
+    """
+    if _target(options) is None:
+        return []
+    return ["--convert-tile-tensor-to-vector", "--canonicalize", "--cse"]
+
+
+def _remarks_args() -> list:
+    regex = os.getenv("TRITON_RISCV_REMARKS", "")
+    return [f"--remarks-filter={regex}"] if regex else []
 
 
 def _mcpu_args(options) -> list:
