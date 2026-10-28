@@ -59,20 +59,6 @@ class RiscvToolchain:
             qemu_cpu=os.getenv("TRITON_RISCV_QEMU_CPU") or None,
         )
 
-    def llc_command(
-        self, llc: str, source: str | os.PathLike, output: str | os.PathLike
-    ) -> list[str]:
-        return [
-            llc,
-            str(source),
-            "-filetype=obj",
-            f"-mtriple={self.triple}",
-            f"-mattr={self.llc_features}",
-            "-relocation-model=pic",
-            "-o",
-            str(output),
-        ]
-
     def linker(self) -> str:
         return _find_tool(
             self.cc,
@@ -376,7 +362,6 @@ def compile_to_elf(
 
     toolchain = toolchain or RiscvToolchain.from_env()
     updates = {
-        "TRITON_RISCV_CROSS_COMPILE": "1",
         "TRITON_RISCV_TARGET_TRIPLE": toolchain.triple,
         "TRITON_RISCV_LLC_FEATURES": toolchain.llc_features,
     }

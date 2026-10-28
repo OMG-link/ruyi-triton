@@ -48,7 +48,14 @@ def test_user_kernel_warmup_emits_riscv_ime_object(tmp_path):
     kernel_path.write_text(USER_KERNEL)
 
     env = os.environ.copy()
-    env.update({"TRITON_RISCV_USE_IME": "1"})
+    # The IME pipeline does not pick a target; state the K1 core.
+    env.update(
+        {
+            "TRITON_RISCV_USE_IME": "1",
+            "TRITON_RISCV_TARGET_TRIPLE": "riscv64-unknown-linux-gnu",
+            "TRITON_RISCV_MCPU": "spacemit-x60",
+        }
+    )
     subprocess.check_call(
         [sys.executable, str(kernel_path), str(obj_path)],
         cwd=ROOT,

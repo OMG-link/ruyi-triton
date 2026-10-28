@@ -1,6 +1,6 @@
 from triton.backends.compiler import BaseBackend, GPUTarget
 from triton._C.libtriton import ir, passes
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Dict, Tuple
 from types import ModuleType
 import hashlib
@@ -15,7 +15,7 @@ import triton
 from pathlib import Path
 
 from .paths import _get_buddy_opt_path, _get_llvm_bin_path, _get_triton_shared_opt_path
-from .riscv import DEFAULT_LLC_FEATURES, RiscvToolchain
+from .riscv import DEFAULT_LLC_FEATURES
 
 
 def _get_buddy_translate_path() -> str:
@@ -311,6 +311,13 @@ def _enable_fadd_reassociation(llir: str) -> str:
     return _FADD_INSTRUCTION.sub(add_flag, llir)
 
 
+_HOST_TRIPLES = {
+    "x86_64": "x86_64-unknown-linux-gnu",
+    "AMD64": "x86_64-unknown-linux-gnu",
+    "riscv64": "riscv64-unknown-linux-gnu",
+}
+
+
 @functools.lru_cache()
 def _get_host_cpu() -> str:
     """LLVM's name for the host CPU, e.g. spacemit-x60 on the SpacemiT K1."""
@@ -321,32 +328,125 @@ def _get_host_cpu() -> str:
     return match.group(1) if match else "generic"
 
 
-def _target(options):
-    """(triple, cpu, features) of the compilation target, or None if unknown.
+def _host_triple():
+    return _HOST_TRIPLES.get(platform.machine())
 
-    The target is stated, never guessed: an explicit triple (cross compilation
-    and the IME pipeline) uses `target_cpu` and `target_features` as given.
-    A native build uses the host CPU LLVM detects, which on x86 is the CPU
-    `-mcpu=native` selects for opt and llc.
+
+def _arch_of(triple: str) -> str:
+    return triple.split("-", 1)[0]
+
+
+def _resolve_target(args: dict) -> None:
+    """Fill target_triple, target_cpu and target_features in `args`.
+
+    This is the only place the compilation target is decided; every tool
+    (buddy-opt, opt, llc) receives exactly this target. Each field comes from
+    the caller's option, then its environment variable, then the host:
+
+      triple    TRITON_RISCV_TARGET_TRIPLE   the host triple
+      cpu       TRITON_RISCV_MCPU            the host CPU LLVM detects, when
+                                             the target is the host's arch
+      features  TRITON_RISCV_LLC_FEATURES    the RISC-V Linux baseline for
+                                             RISC-V, none for x86
+
+    Compiling for an arch other than the host's is the only cross
+    compilation; nothing else changes how the target is chosen. On a host
+    LLVM has no triple for and with no triple given, the target stays unset.
     """
+    triple = (
+        args.get("target_triple")
+        or os.getenv("TRITON_RISCV_TARGET_TRIPLE")
+        or _host_triple()
+    )
+    if not triple:
+        return
+    args["target_triple"] = triple
+    host = _host_triple()
+    native = host is not None and _arch_of(host) == _arch_of(triple)
+    if not args.get("target_cpu"):
+        args["target_cpu"] = os.getenv("TRITON_RISCV_MCPU") or (
+            _get_host_cpu() if native else "generic"
+        )
+    if args.get("target_features") is None:
+        default = DEFAULT_LLC_FEATURES if triple.startswith("riscv") else ""
+        args["target_features"] = os.getenv("TRITON_RISCV_LLC_FEATURES", default)
+
+
+def _target(options):
+    """(triple, cpu, features) of the compilation target, or None if unset."""
     triple = getattr(options, "target_triple", None)
-    cpu = getattr(options, "target_cpu", None) or "generic"
-    if triple:
-        return triple, cpu, getattr(options, "target_features", None) or ""
-    machine = platform.machine()
-    if machine == "riscv64":
-        return "riscv64-unknown-linux-gnu", cpu, DEFAULT_LLC_FEATURES
-    if machine in {"x86_64", "AMD64"}:
-        return "x86_64-unknown-linux-gnu", _get_host_cpu(), ""
-    return None
-
-
-def _riscv_target(options):
-    """(triple, cpu, features) when the target is RISC-V, else None."""
-    target = _target(options)
-    if target is None or not target[0].startswith("riscv"):
+    if not triple:
         return None
-    return target
+    return (
+        triple,
+        getattr(options, "target_cpu", None) or "generic",
+        getattr(options, "target_features", None) or "",
+    )
+
+
+def _is_riscv(options) -> bool:
+    target = _target(options)
+    return target is not None and target[0].startswith("riscv")
+
+
+def _is_native(options) -> bool:
+    target = _target(options)
+    host = _host_triple()
+    return target is not None and host is not None and (
+        _arch_of(host) == _arch_of(target[0])
+    )
+
+
+def _llvm_target_args(options) -> list:
+    """-mtriple/-mcpu/-mattr for opt and llc, plus the RISC-V VLEN bounds."""
+    target = _target(options)
+    if target is None:
+        return []
+    triple, cpu, features = target
+    args = [f"-mtriple={triple}"]
+    if cpu != "generic":
+        args.append(f"-mcpu={cpu}")
+    if features:
+        args.append(f"-mattr={features}")
+    if triple.startswith("riscv"):
+        args += _riscv_vector_bits_args(options)
+    return args
+
+
+@functools.lru_cache()
+def _target_has_extension(triple: str, cpu: str, features: str, ext: str) -> bool:
+    """Whether buddy's TargetInfo, the facts the passes read, lists `ext`."""
+    output = subprocess.run(
+        [
+            _get_buddy_opt_path(),
+            f"--set-llvm-target=triple={triple} chip={cpu} features={features}",
+            "--test-target-info",
+            "-o",
+            os.devnull,
+        ],
+        input="module {}\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    facts = " ".join(
+        line for line in output.splitlines() if line.startswith(("isa:", "features:"))
+    )
+    return re.search(rf"(^|[_,: ]){re.escape(ext)}(\d|,|$|_| )", facts) is not None
+
+
+def _check_ime_target(options) -> None:
+    """The IME pipeline lowers matmuls to XSMTVDot; the target must have it."""
+    target = _target(options)
+    if target is None or not target[0].startswith("riscv") or not (
+        _target_has_extension(*target, "xsmtvdot")
+    ):
+        raise ValueError(
+            "TRITON_RISCV_USE_IME=1 needs a RISC-V target with XSMTVDot, but the "
+            f"target is {target}. Set TRITON_RISCV_MCPU=spacemit-x60 (or add "
+            "+xsmtvdot to TRITON_RISCV_LLC_FEATURES) when not compiling on the "
+            "SpacemiT K1 itself."
+        )
 
 
 def _set_llvm_target_args(options) -> list:
@@ -381,15 +481,8 @@ def _remarks_args() -> list:
     return [f"--remarks-filter={regex}"] if regex else []
 
 
-def _mcpu_args(options) -> list:
-    target = _riscv_target(options)
-    if target is None or target[1] == "generic":
-        return []
-    return [f"-mcpu={target[1]}"]
-
-
 def _riscv_vector_bits_args(options=None) -> list:
-    """VLEN assumptions for native RISC-V opt/llc.
+    """VLEN assumptions for RISC-V opt/llc.
 
     Pinning the maximum VLEN below the hardware's makes LLVM size vector stack
     slots too small: a whole-register spill on a wider core then overwrites
@@ -401,7 +494,9 @@ def _riscv_vector_bits_args(options=None) -> list:
     vlen = os.getenv("TRITON_RISCV_VLEN", "").strip()
     if not vlen:
         # A named CPU brings its Zvl* bound; LLVM rejects a smaller minimum.
-        return [] if _mcpu_args(options) else ["-riscv-v-vector-bits-min=128"]
+        target = _target(options)
+        named = target is not None and target[1] != "generic"
+        return [] if named else ["-riscv-v-vector-bits-min=128"]
     if not vlen.isdigit() or int(vlen) < 128 or int(vlen) & (int(vlen) - 1):
         raise ValueError("TRITON_RISCV_VLEN must be a power of two >= 128")
     return [f"-riscv-v-vector-bits-min={vlen}", f"-riscv-v-vector-bits-max={vlen}"]
@@ -409,15 +504,11 @@ def _riscv_vector_bits_args(options=None) -> list:
 
 def _optimize_llir(llir: str, options=None):
     # llc's -O3 controls code-generation optimizations but does not run the
-    # target-aware LLVM middle-end pipeline.  In particular, scalar linalg
+    # target-aware LLVM middle-end pipeline. In particular, scalar linalg
     # loops emitted for elementwise Triton tiles remain scalar unless opt sees
-    # the host vector width.  Run the native O3 pipeline for host x86 builds;
-    # leave cross-compiled IR untouched so its explicit target contract is
-    # preserved by the RISC-V toolchain below.
-    host_machine = platform.machine()
-    if host_machine not in {"x86_64", "AMD64", "riscv64"} or getattr(
-        options, "target_triple", None
-    ):
+    # the target's vector width. Run the O3 pipeline for the target the
+    # options describe, native or not.
+    if _target(options) is None:
         return llir
 
     if getattr(options, "allow_fp_reassoc", False):
@@ -482,24 +573,10 @@ def _optimize_llir(llir: str, options=None):
         src_path = os.path.join(tmpdir, "kernel.ll")
         dst_path = os.path.join(tmpdir, "kernel-opt.ll")
         Path(src_path).write_text(llir)
-        command = [_get_llvm_bin_path("opt"), "-O3"]
-        if host_machine in {"x86_64", "AMD64"}:
-            command.extend(
-                [
-                    "-mtriple=x86_64-unknown-linux-gnu",
-                    "-mcpu=native",
-                    "-vector-library=LIBMVEC",
-                ]
-            )
-        else:
-            command.extend(
-                [
-                    "-mtriple=riscv64-unknown-linux-gnu",
-                    f"-mattr={DEFAULT_LLC_FEATURES}",
-                    *_mcpu_args(options),
-                    *_riscv_vector_bits_args(options),
-                ]
-            )
+        command = [_get_llvm_bin_path("opt"), "-O3", *_llvm_target_args(options)]
+        if not _is_riscv(options) and _is_native(options):
+            # The x86 launcher links libmvec, so its vector math is available.
+            command.append("-vector-library=LIBMVEC")
         command.extend(["-S", src_path, "-o", dst_path])
         subprocess.check_call(command)
         _dump_ir_if_needed([dst_path])
@@ -702,53 +779,27 @@ def _llir_to_bin(llir: str, metadata, options=None):
                 subprocess_args.extend(["-g", "-fsanitize=thread"])
 
             subprocess.check_call(subprocess_args)
-        elif _use_ime_pipeline():
-            # IME path: cross-compile to RISC-V with XSMTIME (vfmadot / vmadot).
-            # buddy-llc understands the RISC-V IME intrinsics produced by
-            # buddy-translate and generates correct machine code.
-            buddy_llc_path = _get_buddy_llc_path()
-            toolchain = RiscvToolchain.from_env()
-            toolchain = replace(
-                toolchain, llc_features=f"{toolchain.llc_features},+xsmtvdot"
+        else:
+            # buddy-llc and llc share one LLVM; buddy-llc also registers
+            # buddy's dialect-independent codegen extensions the IME path
+            # relies on.
+            llc_path = (
+                _get_buddy_llc_path()
+                if _use_ime_pipeline()
+                else _get_llvm_bin_path("llc")
             )
             subprocess.check_call(
-                toolchain.llc_command(buddy_llc_path, src_path, dst_path)
-                + _mcpu_args(options)
+                [
+                    llc_path,
+                    src_path,
+                    "-filetype=obj",
+                    "-O3",
+                    "-relocation-model=pic",
+                    *_llvm_target_args(options),
+                    "-o",
+                    dst_path,
+                ]
             )
-        else:
-            llc_path = _get_llvm_bin_path("llc")
-            llc_args = [
-                llc_path,
-                src_path,
-                "-filetype=obj",
-                "-O3",
-                "-relocation-model=pic",
-                "-o",
-                dst_path,
-            ]
-            # On RISC-V Linux, the system ABI is lp64d (hardware double-precision float).
-            # Without explicitly enabling +f,+d, llc defaults to soft-float, causing
-            # "can't link soft-float modules with double-float modules" linker errors.
-            target_triple = getattr(options, "target_triple", None)
-            if target_triple:
-                toolchain = replace(
-                    RiscvToolchain.from_env(),
-                    triple=target_triple,
-                    llc_features=options.target_features,
-                )
-                llc_args = toolchain.llc_command(llc_path, src_path, dst_path)
-                llc_args += _mcpu_args(options)
-            elif platform.machine() == "riscv64":
-                llc_args.extend(
-                    [
-                        f"-mattr={DEFAULT_LLC_FEATURES}",
-                        *_mcpu_args(options),
-                        *_riscv_vector_bits_args(options),
-                    ]
-                )
-            elif platform.machine() in {"x86_64", "AMD64"}:
-                llc_args.extend(["-mcpu=native"])
-            subprocess.check_call(llc_args)
 
         return Path(dst_path).read_bytes()
 
@@ -804,25 +855,11 @@ class CPUBackend(BaseBackend):
             {k: opts[k] for k in CPUOptions.__dataclass_fields__.keys() if k in opts}
         )
         args.setdefault("openmp_num_threads", _get_openmp_num_threads())
-        if (
-            os.getenv("TRITON_RISCV_CROSS_COMPILE", "") == "1"
-            or _use_ime_pipeline()
-            or args.get("target_triple")
-        ):
-            toolchain = RiscvToolchain.from_env()
-            args.setdefault("target_triple", toolchain.triple)
-            args.setdefault("target_features", toolchain.llc_features)
-        # The CPU names LLVM's processor entry for the target: given by the
-        # caller, the IME pipeline's K1 core, or the host on a native RISC-V
-        # build. A cross build without one is described by its features alone.
-        if not args.get("target_cpu"):
-            if os.getenv("TRITON_RISCV_MCPU"):
-                args["target_cpu"] = os.environ["TRITON_RISCV_MCPU"]
-            elif _use_ime_pipeline():
-                args["target_cpu"] = "spacemit-x60"
-            elif not args.get("target_triple") and platform.machine() == "riscv64":
-                args["target_cpu"] = _get_host_cpu()
-        return CPUOptions(**args)
+        _resolve_target(args)
+        options = CPUOptions(**args)
+        if _use_ime_pipeline():
+            _check_ime_target(options)
+        return options
 
     def get_codegen_implementation(self, options):
         codegen_fns = {"min_dot_size": lambda lhsType, rhsType: (1, 1, 1)}
