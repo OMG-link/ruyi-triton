@@ -1,8 +1,17 @@
-﻿#include <pybind11/pybind11.h>
+#include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
-// The CPU backend with triton_shared doesn't do compilation from within python
-// but rather externally through triton-shared-opt, so we leave this function
-// blank.
-void init_triton_triton_shared(py::module &&m) {}
+static unsigned readHostVLEN() {
+#if defined(__riscv) && defined(__riscv_vector)
+  unsigned long bytes;
+  asm volatile("csrr %0, vlenb" : "=r"(bytes));
+  return bytes * 8;
+#else
+  return 0;
+#endif
+}
+
+void init_triton_triton_shared(py::module &&m) {
+  m.def("read_host_vlen", &readHostVLEN);
+}

@@ -122,7 +122,7 @@ def barrier_kernel(x, y):
 
 x = torch.zeros((4,), dtype=torch.float32)
 y = torch.empty_like(x)
-compiled = barrier_kernel.warmup(x, y, grid=(1,))
+compiled = barrier_kernel.warmup(x, y, grid=(1,), riscv_vlen=256)
 Path(sys.argv[1]).write_bytes(compiled.asm["obj"])
 Path(sys.argv[2]).write_text(compiled.asm["llir"])
 """

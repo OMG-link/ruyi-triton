@@ -338,8 +338,64 @@ def _arch_of(triple: str) -> str:
     return triple.split("-", 1)[0]
 
 
+@functools.lru_cache()
+def _riscv_vlen_bounds(triple, cpu, features):
+    """Query LLVM-derived bounds before applying an explicit exact VLEN."""
+    output = subprocess.run(
+        [_get_buddy_opt_path(),
+         f"--set-llvm-target=triple={triple} chip={cpu} features={features}",
+         "--test-target-info", "-o", os.devnull],
+        input="module {}\n", capture_output=True, text=True, check=True,
+    ).stdout
+    facts = dict(line.split(": ", 1) for line in output.splitlines() if ": " in line)
+    return int(facts["min-vlen"]), int(facts["max-vector-bits"])
+
+
+def _read_host_vlen():
+    from triton._C.libtriton import triton_shared
+    return triton_shared.read_host_vlen()
+
+
+def _validate_vlen(value):
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError("riscv_vlen must be zero or a power of two >= 128")
+    try:
+        bits = int(value)
+    except ValueError as exc:
+        raise ValueError("riscv_vlen must be zero or a power of two >= 128") from exc
+    if bits != 0 and (bits < 128 or bits & (bits - 1)):
+        raise ValueError("riscv_vlen must be zero or a power of two >= 128")
+    return bits
+
+
+def _resolve_vlen(args):
+    explicit = args.get("riscv_vlen")
+    if explicit is None:
+        value = os.getenv("TRITON_RISCV_VLEN", "").strip()
+        explicit = value if value else None
+    if not args["target_triple"].startswith("riscv"):
+        if explicit is not None and _validate_vlen(explicit):
+            raise ValueError("riscv_vlen is only supported for RISC-V targets")
+        args["riscv_vlen"] = 0
+        return
+    lower, upper = _riscv_vlen_bounds(
+        args["target_triple"], args["target_cpu"], args["target_features"])
+    if explicit is not None:
+        bits = _validate_vlen(explicit)
+    elif lower != 0 and lower == upper:
+        bits = lower
+    else:
+        bits = _validate_vlen(_read_host_vlen())
+    if bits and lower == 0:
+        raise ValueError("nonzero riscv_vlen requires a target with RVV support")
+    if bits and not lower <= bits <= upper:
+        raise ValueError(
+            f"riscv_vlen={bits} conflicts with target VLEN range [{lower}, {upper}]")
+    args["riscv_vlen"] = bits
+
+
 def _resolve_target(args: dict) -> None:
-    """Fill target_triple, target_cpu and target_features in `args`.
+    """Resolve the target and exact VLEN into `args`.
 
     This is the only place the compilation target is decided; every tool
     (buddy-opt, opt, llc) receives exactly this target. Each field comes from
@@ -350,6 +406,8 @@ def _resolve_target(args: dict) -> None:
                                              the target is the host's arch
       features  TRITON_RISCV_LLC_FEATURES    the RISC-V Linux baseline for
                                              RISC-V, none for x86
+      vlen      TRITON_RISCV_VLEN            equal ISA bounds, then host VLEN,
+                                             then zero (unknown)
 
     Compiling for an arch other than the host's is the only cross
     compilation; nothing else changes how the target is chosen. On a host
@@ -361,6 +419,7 @@ def _resolve_target(args: dict) -> None:
         or _host_triple()
     )
     if not triple:
+        args["riscv_vlen"] = 0
         return
     args["target_triple"] = triple
     host = _host_triple()
@@ -372,6 +431,7 @@ def _resolve_target(args: dict) -> None:
     if args.get("target_features") is None:
         default = DEFAULT_LLC_FEATURES if triple.startswith("riscv") else ""
         args["target_features"] = os.getenv("TRITON_RISCV_LLC_FEATURES", default)
+    _resolve_vlen(args)
 
 
 def _target(options):
@@ -449,7 +509,8 @@ def _set_llvm_target_args(options) -> list:
     if target is None:
         return []
     triple, cpu, features = target
-    return [f"--set-llvm-target=triple={triple} chip={cpu} features={features}"]
+    return [f"--set-llvm-target=triple={triple} chip={cpu} features={features} "
+            f"vlen={options.riscv_vlen or 0}"]
 
 
 def _tile_to_vector_args(options, ime=False) -> list:
@@ -496,24 +557,14 @@ def _remarks_args() -> list:
 
 
 def _riscv_vector_bits_args(options=None) -> list:
-    """VLEN assumptions for RISC-V opt/llc.
-
-    Pinning the maximum VLEN below the hardware's makes LLVM size vector stack
-    slots too small: a whole-register spill on a wider core then overwrites
-    the saved registers next to it. The CPU's Zvl* bound, or the RVV minimum
-    of 128 bits without a CPU, is the only assumption by default;
-    TRITON_RISCV_VLEN pins the exact VLEN of the target (256 on the SpacemiT
-    K1) when it is known.
-    """
-    vlen = os.getenv("TRITON_RISCV_VLEN", "").strip()
-    if not vlen:
-        # A named CPU brings its Zvl* bound; LLVM rejects a smaller minimum.
-        target = _target(options)
-        named = target is not None and target[1] != "generic"
-        return [] if named else ["-riscv-v-vector-bits-min=128"]
-    if not vlen.isdigit() or int(vlen) < 128 or int(vlen) & (int(vlen) - 1):
-        raise ValueError("TRITON_RISCV_VLEN must be a power of two >= 128")
-    return [f"-riscv-v-vector-bits-min={vlen}", f"-riscv-v-vector-bits-max={vlen}"]
+    """Use only the VLEN resolved into the compilation options."""
+    vlen = getattr(options, "riscv_vlen", 0)
+    if vlen:
+        return [f"-riscv-v-vector-bits-min={vlen}",
+                f"-riscv-v-vector-bits-max={vlen}"]
+    target = _target(options)
+    named = target is not None and target[1] != "generic"
+    return [] if named else ["-riscv-v-vector-bits-min=128"]
 
 
 def _optimize_llir(llir: str, options=None):
@@ -842,6 +893,7 @@ class CPUOptions:
     target_triple: str = None
     target_features: str = None
     target_cpu: str = None
+    riscv_vlen: int = None
     openmp_num_threads: int = 0
     allow_fp_reassoc: bool = False
 
