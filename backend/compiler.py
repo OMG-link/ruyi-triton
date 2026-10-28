@@ -461,9 +461,10 @@ def _tile_to_vector_args(options, ime=False) -> list:
     the n-D vectors and their transfers onto 1-D registers. The IME pipeline
     also converts K1-sized matmul(A, transpose(B)) into vector.contract, which
     `--lower-vector-contract-to-ime-tile` turns into vmadot tile dots that its
-    `--lower-ime` lowers. TRITON_RISCV_REMARKS=<regex> prints the
-    optimization remarks whose category matches, e.g. `tile-to-vector`;
-    remarks are silent otherwise.
+    `--lower-ime` lowers. `--lower-cpu-sched-barrier` lowers `cpu.sched_barrier` to inline asm that
+    holds its values in registers.
+    TRITON_RISCV_REMARKS=<regex> prints the optimization remarks whose
+    category matches, e.g. `tile-to-vector`; remarks are silent otherwise.
     """
     if _target(options) is None:
         return []
@@ -474,6 +475,7 @@ def _tile_to_vector_args(options, ime=False) -> list:
             "--cse",
             "--lower-vector-contract-to-ime-tile",
             "--flatten-vector-tiles",
+            "--lower-cpu-sched-barrier",
             "--canonicalize",
             "--cse",
         ]
@@ -482,6 +484,7 @@ def _tile_to_vector_args(options, ime=False) -> list:
         "--canonicalize",
         "--cse",
         "--flatten-vector-tiles",
+        "--lower-cpu-sched-barrier",
         "--canonicalize",
         "--cse",
     ]

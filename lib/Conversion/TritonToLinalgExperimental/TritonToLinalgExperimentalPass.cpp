@@ -16,6 +16,7 @@
 #include "triton-shared/Conversion/TritonToStructured/TritonToStructured.h"
 #include "triton-shared/Conversion/TritonToUnstructured/TritonToUnstructured.h"
 #include "triton-shared/Conversion/UnstructuredToMemref/UnstructuredToMemref.h"
+#include "triton-shared/Dialect/Cpu/IR/CpuDialect.h"
 #include "triton-shared/Dialect/TPtr/IR/TPtrDialect.h"
 #include "triton-shared/Dialect/TritonStructured/IR/TritonStructuredDialect.h"
 #include "triton-shared/Dialect/TritonTilingExt/IR/TritonTilingExtDialect.h"
@@ -45,13 +46,13 @@ class TritonToLinalgExperimentalPass
 
 public:
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry
-        .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-                linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-                tensor::TensorDialect, bufferization::BufferizationDialect,
-                memref::MemRefDialect, vector::VectorDialect,
-                ttx::TritonTilingExtDialect, tts::TritonStructuredDialect,
-                tptr::TPtrDialect, ptr::PtrDialect>();
+    registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+                    linalg::LinalgDialect, affine::AffineDialect,
+                    scf::SCFDialect, tensor::TensorDialect,
+                    bufferization::BufferizationDialect, memref::MemRefDialect,
+                    vector::VectorDialect, ttx::TritonTilingExtDialect,
+                    tts::TritonStructuredDialect, tptr::TPtrDialect,
+                    ptr::PtrDialect, triton_shared::cpu::CpuDialect>();
   }
 
   void runOnOperation() override {
@@ -105,6 +106,17 @@ public:
 
     if (failed(runPipeline(pm, getOperation()))) {
       signalPassFailure();
+      return;
+    }
+
+    SmallVector<triton::SchedBarrierOp> barriers;
+    moduleOp.walk([&](triton::SchedBarrierOp op) { barriers.push_back(op); });
+    for (triton::SchedBarrierOp op : barriers) {
+      OpBuilder builder(op);
+      auto lowered = triton_shared::cpu::SchedBarrierOp::create(
+          builder, op.getLoc(), op.getInputs(), op.getMemoryAttr());
+      op.replaceAllUsesWith(lowered.getResults());
+      op.erase();
     }
   }
 };

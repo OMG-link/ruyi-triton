@@ -1,0 +1,6 @@
+set(LLVM_TARGET_DEFINITIONS Cpu.td)
+mlir_tablegen(CpuDialect.h.inc -gen-dialect-decls -dialect=cpu)
+mlir_tablegen(CpuDialect.cpp.inc -gen-dialect-defs -dialect=cpu)
+mlir_tablegen(Cpu.h.inc -gen-op-decls)
+mlir_tablegen(Cpu.cpp.inc -gen-op-defs)
+add_public_tablegen_target(CpuIRIncGen)

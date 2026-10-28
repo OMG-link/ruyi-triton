@@ -1,0 +1,197 @@
+diff --git a/include/triton/Dialect/Triton/IR/Dialect.h b/include/triton/Dialect/Triton/IR/Dialect.h
+index a2d49267b5..40dafdb40a 100644
+--- a/include/triton/Dialect/Triton/IR/Dialect.h
++++ b/include/triton/Dialect/Triton/IR/Dialect.h
+@@ -29,6 +29,12 @@ struct GlobalMemory : public SideEffects::Resource::Base<GlobalMemory> {
+   StringRef getName() const { return "<GlobalMemory>"; }
+ };
+ 
++struct SchedBarrierResource
++    : public SideEffects::Resource::Base<SchedBarrierResource> {
++  StringRef getName() { return "<SchedBarrierResource>"; }
++  StringRef getName() const { return "<SchedBarrierResource>"; }
++};
++
+ class DialectInferLayoutInterface
+     : public DialectInterface::Base<DialectInferLayoutInterface> {
+ public:
+diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
+index 66aafefe84..fca5f0bec4 100644
+--- a/include/triton/Dialect/Triton/IR/TritonOps.td
++++ b/include/triton/Dialect/Triton/IR/TritonOps.td
+@@ -666,6 +666,35 @@ def TT_AllocScratchOp : TT_Op<"alloc_scratch"> {
+     let hasVerifier = 1;
+ }
+ 
++// Scheduling barrier for values live across compiler scheduling boundaries.
++def TT_SchedBarrierOp : TT_Op<"sched_barrier",
++                              [DeclareOpInterfaceMethods<
++                                  MemoryEffectsOpInterface>]> {
++    let summary = "preserve a scheduling boundary between tensor values";
++    let description = [{
++      Returns each tensor operand unchanged and prevents computations using
++      the results from being scheduled before the barrier. This frontend
++      operation is a dev op; downstream compiler passes can insert
++      the corresponding formal scheduling barrier automatically.
++
++      The optional `memory` attribute requests ordering of memory operations
++      in addition to the value dependencies.
++    }];
++
++    let arguments = (ins Variadic<TT_Tensor>:$inputs,
++                         OptionalAttr<UnitAttr>:$memory);
++    let results = (outs Variadic<TT_Tensor>:$results);
++    let builders = [
++      OpBuilder<(ins "ValueRange":$inputs, "bool":$memory), [{
++        build($_builder, $_state, inputs.getTypes(), inputs);
++        if (memory)
++          $_state.addAttribute("memory", $_builder.getUnitAttr());
++      }]>
++    ];
++    let assemblyFormat = "$inputs attr-dict `:` functional-type($inputs, $results)";
++    let hasVerifier = 1;
++}
++
+ //
+ // Dot Op
+ //
+diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
+index d6d9a69b83..a0d7adc3b5 100644
+--- a/lib/Dialect/Triton/IR/Ops.cpp
++++ b/lib/Dialect/Triton/IR/Ops.cpp
+@@ -205,6 +205,29 @@ LogicalResult AllocScratchOp::verify() {
+   return success();
+ }
+ 
++LogicalResult SchedBarrierOp::verify() {
++  if (getInputs().empty())
++    return emitOpError("requires at least one tensor operand");
++  if (getInputs().size() != getResults().size())
++    return emitOpError("must have one result for each input");
++  for (auto [input, result] : llvm::zip(getInputs(), getResults())) {
++    if (input.getType() != result.getType())
++      return emitOpError("result types must match input types");
++  }
++  return success();
++}
++
++void SchedBarrierOp::getEffects(
++    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
++        &effects) {
++  effects.emplace_back(MemoryEffects::Write::get(),
++                       SchedBarrierResource::get());
++  if (getMemory()) {
++    effects.emplace_back(MemoryEffects::Read::get(), GlobalMemory::get());
++    effects.emplace_back(MemoryEffects::Write::get(), GlobalMemory::get());
++  }
++}
++
+ LogicalResult TransOp::verify() {
+   auto order = getOrder();
+   auto srcTy = cast<RankedTensorType>(getSrc().getType());
+diff --git a/python/src/ir.cc b/python/src/ir.cc
+index 5178130f63..38e0e496e3 100644
+--- a/python/src/ir.cc
++++ b/python/src/ir.cc
+@@ -1681,6 +1681,19 @@ void init_triton_ir(py::module &&m) {
+                  ptrType, self.getBuilder().getI64IntegerAttr(numElements),
+                  self.getBuilder().getI32IntegerAttr(alignment));
+            })
++      .def(
++          "create_sched_barrier",
++          [](TritonOpBuilder &self, py::list values, bool memory) {
++            SmallVector<Value> inputs;
++            for (py::handle value : values)
++              inputs.push_back(value.cast<Value>());
++            auto op = self.create<SchedBarrierOp>(inputs, memory);
++            py::list results;
++            for (Value result : op.getResults())
++              results.append(result);
++            return results;
++          },
++          py::arg("values"), py::arg("memory") = false)
+       .def("create_get_num_programs",
+            [](TritonOpBuilder &self, int axis) -> Value {
+              if (axis < 0 || axis > 3)
+diff --git a/python/triton/language/__init__.py b/python/triton/language/__init__.py
+index 6ad4c166ea..f5b724eb07 100644
+--- a/python/triton/language/__init__.py
++++ b/python/triton/language/__init__.py
+@@ -31,6 +31,7 @@ from .standard import (
+ from .core import (
+     PropagateNan,
+     alloc_scratch,
++    sched_barrier,
+     TRITON_MAX_TENSOR_NUMEL,
+     aggregate_replace,
+     load_tensor_descriptor,
+@@ -143,6 +144,7 @@ from . import target_info
+ 
+ __all__ = [
+     "alloc_scratch",
++    "sched_barrier",
+     "PropagateNan",
+     "TRITON_MAX_TENSOR_NUMEL",
+     "load_tensor_descriptor",
+diff --git a/python/triton/language/core.py b/python/triton/language/core.py
+index 89f4f49e37..474e311437 100644
+--- a/python/triton/language/core.py
++++ b/python/triton/language/core.py
+@@ -1973,8 +1973,8 @@ def num_programs(axis, _semantic=None):
+ @builtin
+ def alloc_scratch(shape, dtype, alignment=None, _semantic=None):
+     """
+-    Allocates a scratch buffer private to the current program instance and
+-    returns a pointer to its first element.
++    A dev op that allocates a scratch buffer private to the current
++    program instance and returns a pointer to its first element.
+ 
+     The buffer holds :code:`prod(shape)` contiguous elements of :code:`dtype`
+     in row-major order and is accessed with ordinary :code:`tl.load` and
+@@ -2008,6 +2008,23 @@ def alloc_scratch(shape, dtype, alignment=None, _semantic=None):
+     return _semantic.alloc_scratch(shape, dtype, alignment)
+ 
+ 
++@builtin
++def sched_barrier(*tensors, memory=False, _semantic=None):
++    """A dev op that places a scheduling barrier between tensor values.
++
++    Returns the input tensor when given one tensor, or a tuple of tensors
++    when given multiple tensors. Set :code:`memory=True` to order memory
++    operations across the barrier as well.
++
++    :param tensors: One or more tensors whose values cross the barrier.
++    :type tensors: tl.tensor
++    :param memory: Whether the barrier also orders memory operations.
++    :type memory: bool
++    """
++    memory = _unwrap_if_constexpr(memory)
++    return _semantic.sched_barrier(tensors, memory)
++
++
+ # -----------------------
+ # Block Initialization
+ # -----------------------
+diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
+index 4e9dbdf83b..3c2de4d694 100644
+--- a/python/triton/language/semantic.py
++++ b/python/triton/language/semantic.py
+@@ -64,6 +64,18 @@ class TritonSemantic(Generic[TensorTy]):
+         return self.tensor(
+             self.builder.create_alloc_scratch(ptr_ty.to_ir(self.builder), numel, alignment), ptr_ty)
+ 
++    def sched_barrier(self, tensors, memory: bool):
++        if not tensors:
++            raise ValueError("sched_barrier requires at least one tensor")
++        if not isinstance(memory, bool):
++            raise ValueError(f"sched_barrier memory must be a bool, got {memory}")
++        for value in tensors:
++            if not isinstance(value, tl.tensor):
++                raise TypeError(f"sched_barrier arguments must be tensors, got {type(value).__name__}")
++        results = self.builder.create_sched_barrier([value.handle for value in tensors], memory)
++        wrapped = tuple(self.tensor(value, tensor.type) for value, tensor in zip(results, tensors))
++        return wrapped[0] if len(wrapped) == 1 else wrapped
++
+ # ===----------------------------------------------------------------------===//
+ #                               Implicit Casting Utilities
+ # ===----------------------------------------------------------------------===//

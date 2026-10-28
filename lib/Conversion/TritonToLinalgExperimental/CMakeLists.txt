@@ -15,6 +15,7 @@ add_triton_library(TritonToLinalgExperimental
 
   LINK_LIBS PUBLIC
   TritonTilingExtIR
+  CpuIR
   MLIRArithDialect
   MLIRDialectUtils
   MLIRIR
