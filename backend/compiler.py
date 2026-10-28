@@ -389,14 +389,6 @@ def _is_riscv(options) -> bool:
     return target is not None and target[0].startswith("riscv")
 
 
-def _is_native(options) -> bool:
-    target = _target(options)
-    host = _host_triple()
-    return target is not None and host is not None and (
-        _arch_of(host) == _arch_of(target[0])
-    )
-
-
 def _llvm_target_args(options) -> list:
     """-mtriple/-mcpu/-mattr for opt and llc, plus the RISC-V VLEN bounds."""
     target = _target(options)
@@ -574,8 +566,8 @@ def _optimize_llir(llir: str, options=None):
         dst_path = os.path.join(tmpdir, "kernel-opt.ll")
         Path(src_path).write_text(llir)
         command = [_get_llvm_bin_path("opt"), "-O3", *_llvm_target_args(options)]
-        if not _is_riscv(options) and _is_native(options):
-            # The x86 launcher links libmvec, so its vector math is available.
+        if _target(options)[0].startswith("x86_64"):
+            # glibc's x86 vector math ABI; the launcher links libmvec.
             command.append("-vector-library=LIBMVEC")
         command.extend(["-S", src_path, "-o", dst_path])
         subprocess.check_call(command)
