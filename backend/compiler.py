@@ -158,6 +158,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                 "--convert-math-to-llvm",
                 "--convert-complex-to-llvm",
                 "--convert-vector-to-llvm",
+                "--convert-ub-to-llvm",
                 "--convert-index-to-llvm",
                 "--convert-func-to-llvm",
                 "--memref-expand",
@@ -263,6 +264,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                     "--convert-math-to-llvm",
                     "--convert-complex-to-llvm",
                     "--convert-vector-to-llvm",
+                    "--convert-ub-to-llvm",
                     "--convert-index-to-llvm",
                     "--memref-expand",
                     "--finalize-memref-to-llvm",
@@ -453,19 +455,36 @@ def _set_llvm_target_args(options) -> list:
 def _tile_to_vector_args(options, ime=False) -> list:
     """Keep register-sized tensor tiles in vector registers.
 
-    `--convert-tile-tensor-to-vector` sizes tiles from the #llvm.target
-    attribute, so it runs whenever a target is attached (RISC-V and x86).
-    The IME pipeline also turns K1-sized matmul(A, transpose(B)) into
-    value-level vmadot tile dots, which its `--lower-ime` lowers.
-    TRITON_RISCV_REMARKS=<regex> prints the optimization remarks whose
-    category matches, e.g. `tile-to-vector`; remarks are silent otherwise.
+    `--convert-tile-tensor-to-vector` turns tile tensors into vectors of the
+    same shape, sized from the #llvm.target attribute, so it runs whenever a
+    target is attached (RISC-V and x86). `--flatten-vector-tiles` then maps
+    the n-D vectors and their transfers onto 1-D registers. The IME pipeline
+    also converts K1-sized matmul(A, transpose(B)) into vector.contract, which
+    `--lower-vector-contract-to-ime-tile` turns into vmadot tile dots that its
+    `--lower-ime` lowers. TRITON_RISCV_REMARKS=<regex> prints the
+    optimization remarks whose category matches, e.g. `tile-to-vector`;
+    remarks are silent otherwise.
     """
     if _target(options) is None:
         return []
-    convert = "--convert-tile-tensor-to-vector"
     if ime:
-        convert += "=ime-tile-dot=true"
-    return [convert, "--canonicalize", "--cse"]
+        return [
+            "--convert-tile-tensor-to-vector=contract-k1-tiles=true",
+            "--canonicalize",
+            "--cse",
+            "--lower-vector-contract-to-ime-tile",
+            "--flatten-vector-tiles",
+            "--canonicalize",
+            "--cse",
+        ]
+    return [
+        "--convert-tile-tensor-to-vector",
+        "--canonicalize",
+        "--cse",
+        "--flatten-vector-tiles",
+        "--canonicalize",
+        "--cse",
+    ]
 
 
 def _remarks_args() -> list:
