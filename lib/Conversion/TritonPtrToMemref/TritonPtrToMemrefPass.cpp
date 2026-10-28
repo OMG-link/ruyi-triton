@@ -76,6 +76,36 @@ public:
   }
 };
 
+// Lower each tt.alloc_scratch to a heap memref.alloc and hand it to its users
+// the way a pointer argument is handed to them: as a memref<*xT> cast back to
+// the original !tt.ptr<T>. The loads and stores already lowered by
+// StructuredToMemref and UnstructuredToMemref cast their base pointer to
+// memref<*xT>, so the cast pairs fold away in reconcile-unrealized-casts and
+// the accesses address the allocation directly.
+//
+// No dealloc is emitted here. Every compiler pipeline frees heap memrefs with
+// the ownership-based --buffer-deallocation-pipeline, which rejects input that
+// already contains deallocations; it frees the buffer at the end of the
+// function, which is the end of the program instance.
+static void lowerAllocScratch(ModuleOp moduleOp) {
+  moduleOp.walk([](triton::AllocScratchOp op) {
+    OpBuilder b(op);
+    Location loc = op.getLoc();
+    auto ptrType = cast<triton::PointerType>(op.getType());
+    Type elementType = ptrType.getPointeeType();
+    auto memrefType = MemRefType::get(
+        {static_cast<int64_t>(op.getNumElements())}, elementType);
+    Value alloc = b.create<memref::AllocOp>(
+        loc, memrefType, b.getI64IntegerAttr(op.getAlignment()));
+    Value unranked = b.create<memref::CastOp>(
+        loc, UnrankedMemRefType::get(elementType, /*memorySpace=*/0), alloc);
+    Value ptr = b.create<UnrealizedConversionCastOp>(loc, ptrType, unranked)
+                    .getResult(0);
+    op.replaceAllUsesWith(ptr);
+    op.erase();
+  });
+}
+
 class TritonPtrToMemrefPass
     : public ::impl::TritonPtrToMemrefBase<TritonPtrToMemrefPass> {
 
@@ -83,8 +113,8 @@ public:
   void getDependentDialects(DialectRegistry &registry) const override {
     registry
         .insert<arith::ArithDialect, math::MathDialect, affine::AffineDialect,
-                scf::SCFDialect, tensor::TensorDialect, triton::TritonDialect,
-                tts::TritonStructuredDialect>();
+                memref::MemRefDialect, scf::SCFDialect, tensor::TensorDialect,
+                triton::TritonDialect, tts::TritonStructuredDialect>();
   }
 
   void runOnOperation() override {
@@ -114,6 +144,8 @@ public:
     if (failed(applyPartialConversion(moduleOp, target, std::move(patterns)))) {
       signalPassFailure();
     }
+
+    lowerAllocScratch(moduleOp);
 
     PassManager pm(&getContext(), moduleOp.getOperationName());
     pm.addPass(createCanonicalizerPass());

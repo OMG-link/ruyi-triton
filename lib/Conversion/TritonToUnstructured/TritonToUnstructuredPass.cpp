@@ -391,6 +391,20 @@ public:
       }
     });
 
+    // A per-program scratch buffer is a source pointer, like an argument.
+    root.walk([&](triton::AllocScratchOp op) {
+      auto res = op.getResult();
+      OpBuilder b(op);
+      Value zero = b.create<arith::ConstantOp>(
+          op.getLoc(),
+          b.getIntegerAttr(IntegerType::get(&getContext(), defaultBitWidth),
+                           0));
+
+      ptrArgs.insert(res);
+      offsetMap.insert({res, {res, res.getType(), defaultBitWidth, zero}});
+      workList.push(res);
+    });
+
     root.walk([&](triton::IntToPtrOp op) {
       // We only want to handle single source pointer,
       // skip if this op produces tensor of pointers
