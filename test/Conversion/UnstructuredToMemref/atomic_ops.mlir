@@ -29,11 +29,11 @@ module {
 }
 
 // CHECK-LABEL:   tt.func public @atomic_add_scalar_masked(
-// CHECK:           %cast = memref.cast %0 : memref<*xi32> to memref<?xi32>
 // CHECK:           %1 = arith.index_cast %arg1 : i32 to index
 // CHECK:           %c0_i32 = arith.constant 0 : i32
 // CHECK:           %2 = scf.if %arg3 -> (i32) {
-// CHECK:             %3 = memref.atomic_rmw addi %arg2, %cast[%1] : (i32, memref<?xi32>) -> i32
+// CHECK:             %[[ELEMENT:.*]] = memref.reinterpret_cast %0 to offset: [%1], sizes: [], strides: [] : memref<*xi32> to memref<i32, strided<[], offset: ?>>
+// CHECK:             %3 = memref.atomic_rmw addi %arg2, %[[ELEMENT]][] : (i32, memref<i32, strided<[], offset: ?>>) -> i32
 // CHECK:             scf.yield %3 : i32
 // CHECK:           } else {
 // CHECK:             scf.yield %c0_i32 : i32
@@ -41,16 +41,14 @@ module {
 // CHECK:           tt.return %2 : i32
 
 // CHECK-LABEL:   tt.func public @atomic_cas_tensor(
-// CHECK:           %cast = memref.cast %0 : memref<*xi32> to memref<?xi32>
 // CHECK:           %2 = scf.for %arg4 = %c0 to %c2 step %c1 iter_args(%arg5 = %1) -> (tensor<2xi32>) {
-// CHECK:           %[[BASE:.*]] = memref.extract_aligned_pointer_as_index %cast : memref<?xi32> -> index
+// CHECK:           %[[BASE:.*]] = memref.extract_aligned_pointer_as_index %0 : memref<*xi32> -> index
 // CHECK:           %[[OLD:.*]] = func.call @__triton_shared_atomic_cas_acq_rel(%{{.*}}, %{{.*}}, %{{.*}}) : (index, i32, i32) -> i32
 // CHECK:           tt.return
 
 // CHECK-LABEL:   tt.func public @atomic_cas_float(
-// CHECK:           %[[CAST:.*]] = memref.cast {{.*}} : memref<*xf32> to memref<?xf32>
 // CHECK:           %[[INDEX:.*]] = arith.index_cast %arg1 : i32 to index
-// CHECK:           %[[BASE:.*]] = memref.extract_aligned_pointer_as_index %[[CAST]] : memref<?xf32> -> index
+// CHECK:           %[[BASE:.*]] = memref.extract_aligned_pointer_as_index %0 : memref<*xf32> -> index
 // CHECK:           %[[OLD:.*]] = func.call @__triton_shared_atomic_cas_acq_rel_1(%{{.*}}, %arg2, %arg3) : (index, f32, f32) -> f32
 // CHECK:           tt.return %[[OLD]] : f32
 

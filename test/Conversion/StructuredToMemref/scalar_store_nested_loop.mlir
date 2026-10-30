@@ -22,7 +22,7 @@ module {
 }
 
 // CHECK-LABEL:  func.func @reduce_kernel_2d_0d
-// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<*xf32> {tt.divisibility = 16 : i32}, [[PARAM_1_:%.+]]: i32, [[PARAM_2_:%.+]]: i32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32, [[PARAM_9_:%.+]]: i32, [[PARAM_10_:%.+]]: i32, [[PARAM_11_:%.+]]: i32, [[PARAM_12_:%.+]]: i32) {
+// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<f32> {tt.divisibility = 16 : i32}, [[PARAM_1_:%.+]]: i32, [[PARAM_2_:%.+]]: i32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32, [[PARAM_9_:%.+]]: i32, [[PARAM_10_:%.+]]: i32, [[PARAM_11_:%.+]]: i32, [[PARAM_12_:%.+]]: i32) attributes {llvm.bareptr} {
 // CHECK-DAG:       [[CST_1_1_:%.+]] = arith.constant 1 : i32
 // CHECK-DAG:       [[CST_8_:%.+]] = arith.constant 8 : i32
 // CHECK-DAG:       [[CST_2_:%.+]] = arith.constant 2 : i32
@@ -33,7 +33,7 @@ module {
 // CHECK-NOT: separator of consecutive DAGs
 // CHECK-DAG:           [[VAR_4_:%.+]] = arith.sitofp [[VAR_3_]] : i32 to f32
 // CHECK-DAG:           [[VAR_5_:%.+]] = arith.index_cast [[VAR_arg17_]] : i32 to index
-// CHECK:               [[VAR_reinterpret_cast_:%.+]] = memref.reinterpret_cast [[PARAM_0_]] to offset: {{.}}[[VAR_5_]]{{.}}, sizes: [1], strides: [1] : memref<*xf32> to memref<1xf32, strided<[1], offset: ?>>
+// CHECK:               [[VAR_reinterpret_cast_:%.+]] = memref.reinterpret_cast [[PARAM_0_]] to offset: {{.}}[[VAR_5_]]{{.}}, sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
 // CHECK:               affine.store [[VAR_4_]], [[VAR_reinterpret_cast_]][0] : memref<1xf32, strided<[1], offset: ?>>
 // CHECK-DAG:           [[VAR_7_:%.+]] = arith.addi [[VAR_arg17_]], [[CST_1_1_]] : i32
 // CHECK:               scf.yield [[VAR_7_]] : i32

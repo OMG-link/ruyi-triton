@@ -6,7 +6,7 @@
 // CHECK: #[[$ATTR_1:.+]] = affine_map<(d0, d1) -> (d0, d1)>
 
 // CHECK-LABEL:   func.func @scatter_with_mod(
-// CHECK-SAME:  %[[VAL_0:.*]]: memref<*xbf16> {maia.rank = 4 : i32, tt.divisibility = 16 : i32}, %[[VAL_1:.*]]: memref<*xbf16> {maia.rank = 4 : i32, tt.divisibility = 16 : i32}, %[[VAL_2:.*]]: f32, %[[VAL_3:.*]]: memref<*xf32> {maia.rank = 5 : i32, tt.divisibility = 16 : i32}, %[[VAL_4:.*]]: memref<*xf32> {maia.rank = 5 : i32, tt.divisibility = 16 : i32}, %[[VAL_5:.*]]: memref<*xf32> {maia.rank = 5 : i32, tt.divisibility = 16 : i32}, %[[VAL_6:.*]]: memref<*xi8> {maia.rank = 2 : i32, tt.divisibility = 16 : i32}, %[[VAL_7:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_8:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_9:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_10:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_11:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_12:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_13:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_14:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_15:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_16:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_17:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_18:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_19:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_20:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_21:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_22:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_23:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_24:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_25:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_26:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_27:.*]]: i32, %[[VAL_28:.*]]: i32, %[[VAL_29:.*]]: i32, %[[VAL_30:.*]]: i32, %[[VAL_31:.*]]: i32, %[[VAL_32:.*]]: i32) {
+// CHECK-SAME:  %[[VAL_0:.*]]: memref<bf16> {maia.rank = 4 : i32, tt.divisibility = 16 : i32}, %[[VAL_1:.*]]: memref<bf16> {maia.rank = 4 : i32, tt.divisibility = 16 : i32}, %[[VAL_2:.*]]: f32, %[[VAL_3:.*]]: memref<f32> {maia.rank = 5 : i32, tt.divisibility = 16 : i32}, %[[VAL_4:.*]]: memref<f32> {maia.rank = 5 : i32, tt.divisibility = 16 : i32}, %[[VAL_5:.*]]: memref<f32> {maia.rank = 5 : i32, tt.divisibility = 16 : i32}, %[[VAL_6:.*]]: memref<i8> {maia.rank = 2 : i32, tt.divisibility = 16 : i32}, %[[VAL_7:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_8:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_9:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_10:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_11:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_12:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_13:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_14:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_15:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_16:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_17:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_18:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_19:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_20:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_21:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_22:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_23:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_24:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_25:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_26:.*]]: i32 {tt.divisibility = 16 : i32}, %[[VAL_27:.*]]: i32, %[[VAL_28:.*]]: i32, %[[VAL_29:.*]]: i32, %[[VAL_30:.*]]: i32, %[[VAL_31:.*]]: i32, %[[VAL_32:.*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[BYTE_SCALE:.*]] = tptr.type_offset i8 : i32
 // CHECK:           %[[VAL_33:.*]] = arith.constant 1 : index
 // CHECK:           %[[VAL_34:.*]] = arith.constant 512 : index
@@ -15,8 +15,9 @@
 // CHECK:           %[[VAL_37:.*]] = arith.constant 2 : i32
 // CHECK:           %[[VAL_38:.*]] = arith.constant 32 : i32
 // CHECK:           %[[VAL_39:.*]] = arith.constant 20 : i32
-// CHECK:           %[[BYTE_MEMREF:.*]] = memref.cast %[[VAL_6]] : memref<*xi8> to memref<1xi8>
-// CHECK:           %[[BYTE_PTR:.*]] = tptr.from_memref %[[BYTE_MEMREF]] : memref<1xi8> to <#tptr.default_memory_space>
+// CHECK:           %[[BYTE_MEMREF:.*]] = memref.cast %[[VAL_6]] : memref<i8> to memref<*xi8>
+// CHECK:           %[[BYTE_ADDRESS:.*]] = memref.extract_aligned_pointer_as_index %[[BYTE_MEMREF]] : memref<*xi8> -> index
+// CHECK:           %[[BYTE_PTR:.*]] = tptr.inttoptr %[[BYTE_ADDRESS]] : index to <#tptr.default_memory_space>
 // CHECK:           %[[VAL_40:.*]] = tensor.empty() : tensor<512x128xf32>
 // CHECK:           %[[VAL_41:.*]] = linalg.fill ins(%[[VAL_36]] : f32) outs(%[[VAL_40]] : tensor<512x128xf32>) -> tensor<512x128xf32>
 // CHECK:           %[[VAL_42:.*]] = tensor.empty() : tensor<512x1xi32>
@@ -83,7 +84,7 @@
 // CHECK:             %[[VAL_100:.*]] = tensor.extract %[[VAL_98]]{{\[}}%[[VAL_99]]] : tensor<512xi32>
 // CHECK:             %[[VAL_101:.*]] = arith.index_cast %[[VAL_100]] : i32 to index
 // CHECK:             %[[VAL_102:.*]] = tensor.extract_slice %[[VAL_41]]{{\[}}%[[VAL_99]], 0] [1, 128] [1, 1] : tensor<512x128xf32> to tensor<1x128xf32>
-// CHECK:             %[[VAL_103:.*]] = memref.reinterpret_cast %[[VAL_5]] to offset: {{\[}}%[[VAL_101]]], sizes: [1, 128], strides: [1, 1] : memref<*xf32> to memref<1x128xf32, strided<[1, 1], offset: ?>>
+// CHECK:             %[[VAL_103:.*]] = memref.reinterpret_cast %[[VAL_5]] to offset: {{\[}}%[[VAL_101]]], sizes: [1, 128], strides: [1, 1] : memref<f32> to memref<1x128xf32, strided<[1, 1], offset: ?>>
 // CHECK:             bufferization.materialize_in_destination %[[VAL_102]] in writable %[[VAL_103]] : (tensor<1x128xf32>, memref<1x128xf32, strided<[1, 1], offset: ?>>) -> ()
 // CHECK:           }
 // CHECK:           return

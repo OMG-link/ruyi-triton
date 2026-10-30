@@ -7,7 +7,7 @@
 // CHECK: #[[$ATTR_2:.+]] = affine_map<(d0, d1) -> (d0, d1)>
 
 // CHECK-LABEL:   func.func @row_gather3(
-// CHECK-SAME:  %[[VAL_0:.*]]: memref<*xf32>, %[[VAL_1:.*]]: memref<*xf32>, %[[VAL_2:.*]]: memref<*xf32>, %[[VAL_3:.*]]: i32, %[[VAL_4:.*]]: i32, %[[VAL_5:.*]]: i32, %[[VAL_6:.*]]: i32, %[[VAL_7:.*]]: i32, %[[VAL_8:.*]]: i32, %[[VAL_9:.*]]: i32, %[[VAL_10:.*]]: i32, %[[VAL_11:.*]]: i32, %[[VAL_12:.*]]: i32, %[[VAL_13:.*]]: i32, %[[VAL_14:.*]]: i32, %[[VAL_15:.*]]: i32, %[[VAL_16:.*]]: i32, %[[VAL_17:.*]]: i32, %[[VAL_18:.*]]: i32, %[[VAL_19:.*]]: i32, %[[VAL_20:.*]]: i32, %[[VAL_21:.*]]: i32) {
+// CHECK-SAME:  %[[VAL_0:.*]]: memref<f32>, %[[VAL_1:.*]]: memref<f32>, %[[VAL_2:.*]]: memref<f32>, %[[VAL_3:.*]]: i32, %[[VAL_4:.*]]: i32, %[[VAL_5:.*]]: i32, %[[VAL_6:.*]]: i32, %[[VAL_7:.*]]: i32, %[[VAL_8:.*]]: i32, %[[VAL_9:.*]]: i32, %[[VAL_10:.*]]: i32, %[[VAL_11:.*]]: i32, %[[VAL_12:.*]]: i32, %[[VAL_13:.*]]: i32, %[[VAL_14:.*]]: i32, %[[VAL_15:.*]]: i32, %[[VAL_16:.*]]: i32, %[[VAL_17:.*]]: i32, %[[VAL_18:.*]]: i32, %[[VAL_19:.*]]: i32, %[[VAL_20:.*]]: i32, %[[VAL_21:.*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[VAL_22:.*]] = arith.constant 1 : index
 // CHECK:           %[[VAL_23:.*]] = arith.constant 0 : index
 // CHECK:           %[[VAL_24:.*]] = arith.constant 1 : i32
@@ -103,7 +103,7 @@
 // CHECK:             %[[VAL_114:.*]] = scf.for %[[VAL_115:.*]] = %[[VAL_23]] to %[[VAL_111]] step %[[VAL_22]] iter_args(%[[VAL_116:.*]] = %[[VAL_113]]) -> (tensor<64xf32>) {
 // CHECK:               %[[VAL_117:.*]] = tensor.extract %[[VAL_100]]{{\[}}%[[VAL_115]]] : tensor<64xi32>
 // CHECK:               %[[VAL_118:.*]] = arith.index_cast %[[VAL_117]] : i32 to index
-// CHECK:               %[[VAL_119:.*]] = memref.reinterpret_cast %[[VAL_0]] to offset: {{\[}}%[[VAL_118]]], sizes: [1], strides: [1] : memref<*xf32> to memref<1xf32, strided<[1], offset: ?>>
+// CHECK:               %[[VAL_119:.*]] = memref.reinterpret_cast %[[VAL_0]] to offset: {{\[}}%[[VAL_118]]], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
 // CHECK:               %[[VAL_120:.*]] = memref.load %[[VAL_119]]{{\[}}%[[VAL_23]]] : memref<1xf32, strided<[1], offset: ?>>
 // CHECK:               %[[VAL_121:.*]] = tensor.insert %[[VAL_120]] into %[[VAL_116]]{{\[}}%[[VAL_115]]] : tensor<64xf32>
 // CHECK:               scf.yield %[[VAL_121]] : tensor<64xf32>
@@ -150,7 +150,7 @@
 // CHECK:               %[[VAL_158:.*]] = tensor.extract %[[VAL_141]]{{\[}}%[[VAL_157]]] : tensor<64xi32>
 // CHECK:               %[[VAL_159:.*]] = arith.index_cast %[[VAL_158]] : i32 to index
 // CHECK:               %[[VAL_160:.*]] = arith.addi %[[VAL_159]], %[[VAL_123]] : index
-// CHECK:               %[[VAL_161:.*]] = memref.reinterpret_cast %[[VAL_1]] to offset: {{\[}}%[[VAL_160]]], sizes: [1, 64], strides: [1, %[[VAL_122]]] : memref<*xf32> to memref<1x64xf32, strided<[1, ?], offset: ?>>
+// CHECK:               %[[VAL_161:.*]] = memref.reinterpret_cast %[[VAL_1]] to offset: {{\[}}%[[VAL_160]]], sizes: [1, 64], strides: [1, %[[VAL_122]]] : memref<f32> to memref<1x64xf32, strided<[1, ?], offset: ?>>
 // CHECK:               %[[VAL_162:.*]] = memref.subview %[[VAL_161]][0, 0] [1, %[[VAL_151]]] [1, 1] : memref<1x64xf32, strided<[1, ?], offset: ?>> to memref<1x?xf32, strided<[1, ?], offset: ?>>
 // CHECK:               %[[VAL_163:.*]] = memref.subview %[[VAL_153]]{{\[}}%[[VAL_157]], 0] [1, %[[VAL_151]]] [1, 1] : memref<64x64xf32> to memref<1x?xf32, strided<[64, 1], offset: ?>>
 // CHECK:               memref.copy %[[VAL_162]], %[[VAL_163]] : memref<1x?xf32, strided<[1, ?], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
@@ -220,7 +220,7 @@
 // CHECK:             %[[VAL_223:.*]] = arith.index_cast %[[VAL_222]] : i32 to index
 // CHECK:             %[[VAL_224:.*]] = tensor.extract_slice %[[VAL_68]]{{\[}}%[[VAL_221]], 0] [1, %[[VAL_219]]] [1, 1] : tensor<64x64xf32> to tensor<1x?xf32>
 // CHECK:             %[[VAL_225:.*]] = arith.addi %[[VAL_223]], %[[VAL_44]] : index
-// CHECK:             %[[VAL_226:.*]] = memref.reinterpret_cast %[[VAL_2]] to offset: {{\[}}%[[VAL_225]]], sizes: [1, 64], strides: [1, 1] : memref<*xf32> to memref<1x64xf32, strided<[1, 1], offset: ?>>
+// CHECK:             %[[VAL_226:.*]] = memref.reinterpret_cast %[[VAL_2]] to offset: {{\[}}%[[VAL_225]]], sizes: [1, 64], strides: [1, 1] : memref<f32> to memref<1x64xf32, strided<[1, 1], offset: ?>>
 // CHECK:             %[[VAL_227:.*]] = memref.subview %[[VAL_226]][0, 0] [1, %[[VAL_219]]] [1, 1] : memref<1x64xf32, strided<[1, 1], offset: ?>> to memref<1x?xf32, strided<[1, 1], offset: ?>>
 // CHECK:             %[[VAL_228:.*]] = memref.cast %[[VAL_227]] : memref<1x?xf32, strided<[1, 1], offset: ?>> to memref<1x?xf32, strided<[?, ?], offset: ?>>
 // CHECK:             bufferization.materialize_in_destination %[[VAL_224]] in writable %[[VAL_228]] : (tensor<1x?xf32>, memref<1x?xf32, strided<[?, ?], offset: ?>>) -> ()

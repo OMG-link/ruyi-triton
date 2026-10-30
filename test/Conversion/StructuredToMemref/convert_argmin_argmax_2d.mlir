@@ -31,8 +31,8 @@
 // CHECK: #[[$ATTR_1:.+]] = affine_map<(d0, d1) -> (0, d1)>
 // CHECK: #[[$ATTR_2:.+]] = affine_map<(d0, d1) -> (d0, d1)>
 // CHECK-LABEL:   func.func @test_argmax(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -40,7 +40,7 @@
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 0xFF800000 : f32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant -1 : i32
 // CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<4xi32>
@@ -53,7 +53,7 @@
 // CHECK:           %[[EXPAND_SHAPE_0:.*]] = tensor.expand_shape %[[GENERIC_0]] {{\[\[}}0, 1]] output_shape [1, 4] : tensor<4xi32> into tensor<1x4xi32>
 // CHECK:           %[[INDEX_CAST_1:.*]] = arith.index_cast %[[ARG2]] : i32 to index
 // CHECK:           %[[INDEX_CAST_2:.*]] = arith.index_cast %[[ARG3]] : i32 to index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [4, 4], strides: {{\[}}%[[INDEX_CAST_1]], %[[INDEX_CAST_2]]] : memref<*xf32> to memref<4x4xf32, strided<[?, ?]>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [4, 4], strides: {{\[}}%[[INDEX_CAST_1]], %[[INDEX_CAST_2]]] : memref<f32> to memref<4x4xf32, strided<[?, ?]>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<4x4xf32>
 // CHECK:           memref.copy %[[REINTERPRET_CAST_0]], %[[ALLOC_0]] : memref<4x4xf32, strided<[?, ?]>> to memref<4x4xf32>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<4x4xf32> to tensor<4x4xf32>
@@ -84,10 +84,13 @@
 // CHECK:             %[[SITOFP_0:.*]] = arith.sitofp %[[VAL_7]] : i32 to f32
 // CHECK:             linalg.yield %[[SITOFP_0]] : f32
 // CHECK:           } -> tensor<4xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [4], strides: [1] : memref<*xf32> to memref<4xf32, strided<[1]>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [4], strides: [1] : memref<f32> to memref<4xf32, strided<[1]>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_2]] in writable %[[REINTERPRET_CAST_1]] : (tensor<4xf32>, memref<4xf32, strided<[1]>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_3:.+]] = affine_map<(d0) -> (d0)>
+// CHECK: #[[$ATTR_4:.+]] = affine_map<(d0, d1) -> (0, d1)>
+// CHECK: #[[$ATTR_5:.+]] = affine_map<(d0, d1) -> (d0, d1)>
 module {
   tt.func public @test_argmax(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32, %arg3: i32) attributes {noinline = false} {
     %0 = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
@@ -144,12 +147,9 @@ module {
 //     print_triton_ir_only=True,
 // )
 
-// CHECK: #[[$ATTR_3:.+]] = affine_map<(d0) -> (d0)>
-// CHECK: #[[$ATTR_4:.+]] = affine_map<(d0, d1) -> (0, d1)>
-// CHECK: #[[$ATTR_5:.+]] = affine_map<(d0, d1) -> (d0, d1)>
 // CHECK-LABEL:   func.func @test_argmin(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -157,7 +157,7 @@ module {
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 0x7F800000 : f32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant -1 : i32
 // CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<4xi32>
@@ -170,7 +170,7 @@ module {
 // CHECK:           %[[EXPAND_SHAPE_0:.*]] = tensor.expand_shape %[[GENERIC_0]] {{\[\[}}0, 1]] output_shape [1, 4] : tensor<4xi32> into tensor<1x4xi32>
 // CHECK:           %[[INDEX_CAST_1:.*]] = arith.index_cast %[[ARG2]] : i32 to index
 // CHECK:           %[[INDEX_CAST_2:.*]] = arith.index_cast %[[ARG3]] : i32 to index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [4, 4], strides: {{\[}}%[[INDEX_CAST_1]], %[[INDEX_CAST_2]]] : memref<*xf32> to memref<4x4xf32, strided<[?, ?]>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [4, 4], strides: {{\[}}%[[INDEX_CAST_1]], %[[INDEX_CAST_2]]] : memref<f32> to memref<4x4xf32, strided<[?, ?]>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<4x4xf32>
 // CHECK:           memref.copy %[[REINTERPRET_CAST_0]], %[[ALLOC_0]] : memref<4x4xf32, strided<[?, ?]>> to memref<4x4xf32>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<4x4xf32> to tensor<4x4xf32>
@@ -201,7 +201,7 @@ module {
 // CHECK:             %[[SITOFP_0:.*]] = arith.sitofp %[[VAL_7]] : i32 to f32
 // CHECK:             linalg.yield %[[SITOFP_0]] : f32
 // CHECK:           } -> tensor<4xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [4], strides: [1] : memref<*xf32> to memref<4xf32, strided<[1]>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [4], strides: [1] : memref<f32> to memref<4xf32, strided<[1]>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_2]] in writable %[[REINTERPRET_CAST_1]] : (tensor<4xf32>, memref<4xf32, strided<[1]>>) -> ()
 // CHECK:           return
 // CHECK:         }

@@ -56,8 +56,7 @@ public:
     // The order of type conversion is important: later ones are tried earlier.
     addConversion([](Type type) { return type; });
     addConversion([](triton::PointerType ptrType) {
-      return UnrankedMemRefType::get(getMemRefElementTypeForPointer(ptrType),
-                                     /*memorySpace=*/0);
+      return MemRefType::get({}, getMemRefElementTypeForPointer(ptrType));
     });
     addConversion([](RankedTensorType tensorType) -> std::optional<Type> {
       if (auto ptrType =
@@ -69,6 +68,20 @@ public:
 
     auto createUnrealizedCast = [&](OpBuilder &builder, Type resultType,
                                     ValueRange inputs, Location loc) -> Value {
+      // Keep the existing internal unranked representation while exposing a
+      // statically described rank-zero memref at the function boundary.
+      if (isa<triton::PointerType>(resultType) && inputs.size() == 1) {
+        if (auto memref = dyn_cast<MemRefType>(inputs[0].getType())) {
+          Value unranked = builder.create<memref::CastOp>(
+              loc,
+              UnrankedMemRefType::get(memref.getElementType(),
+                                      memref.getMemorySpace()),
+              inputs[0]);
+          return builder
+              .create<UnrealizedConversionCastOp>(loc, resultType, unranked)
+              .getResult(0);
+        }
+      }
       return builder.create<UnrealizedConversionCastOp>(loc, resultType, inputs)
           .getResult(0);
     };
@@ -124,6 +137,18 @@ public:
     ConversionTarget target(getContext());
     TritonFunctionSignatureConverter typeConverter;
 
+    // FuncToLLVM reconstructs the rank-zero descriptor from one data pointer.
+    // Limit this calling convention to functions whose pointer ABI we convert.
+    moduleOp.walk([&](FunctionOpInterface function) {
+      auto type = dyn_cast<FunctionType>(function.getFunctionType());
+      if (type &&
+          (llvm::any_of(type.getInputs(),
+                        [](Type t) { return isa<triton::PointerType>(t); }) ||
+           llvm::any_of(type.getResults(),
+                        [](Type t) { return isa<triton::PointerType>(t); })))
+        function->setAttr("llvm.bareptr", UnitAttr::get(&getContext()));
+    });
+
     // Update function signature and call ops to use memrefs
     target.addDynamicallyLegalOp<func::FuncOp, triton::FuncOp>([&](auto op) {
       return typeConverter.isSignatureLegal(
@@ -140,6 +165,10 @@ public:
     populateFunctionOpInterfaceTypeConversionPattern<triton::FuncOp>(
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
+    populateReturnOpTypeConversionPattern(patterns, typeConverter);
+    target.addDynamicallyLegalOp<func::ReturnOp>([&](func::ReturnOp op) {
+      return typeConverter.isLegal(op.getOperandTypes());
+    });
 
     if (failed(applyPartialConversion(moduleOp, target, std::move(patterns)))) {
       signalPassFailure();

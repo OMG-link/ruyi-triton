@@ -2246,22 +2246,13 @@ private:
       int64_t rank = resultType.getRank();
       int gatherDim = ptr.getGatherScatterDim();
 
-      // Flatten the unranked base memref so every gather dimension uses the
-      // same linear-index calculation.
-      Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-      Value sourceLength = rewriter.create<memref::DimOp>(loc, memRefPtr, c0);
-      auto sourceMemrefType =
-          MemRefType::get({ShapedType::kDynamic}, resultType.getElementType());
-      SmallVector<OpFoldResult> sourceSizes{sourceLength};
-      SmallVector<OpFoldResult> sourceStrides{rewriter.getIndexAttr(1)};
-      Value sourceMemref = rewriter.create<memref::ReinterpretCastOp>(
-          loc, sourceMemrefType, memRefPtr, rewriter.getIndexAttr(0),
-          sourceSizes, sourceStrides);
-      auto sourceTensorType = RankedTensorType::get(
-          {ShapedType::kDynamic}, resultType.getElementType());
-      Value sourceTensor = rewriter.create<bufferization::ToTensorOp>(
-          loc, sourceTensorType, sourceMemref, true /*restrict*/,
-          false /*writable*/);
+      // The base is an address carrier; it has no allocation shape. Form a
+      // scalar access view at each computed offset instead of querying dim 0.
+      auto baseType = cast<BaseMemRefType>(memRefPtr.getType());
+      auto scalarLayout = StridedLayoutAttr::get(
+          rewriter.getContext(), ShapedType::kDynamic, {});
+      auto scalarType = MemRefType::get({}, resultType.getElementType(),
+                                        scalarLayout, baseType.getMemorySpace());
 
       Value gatherOffset = ptr.getGatherScatterOffset();
 
@@ -2338,8 +2329,10 @@ private:
                   b.create<arith::MulIOp>(bodyLoc, index, strideValues[dim]);
               linearIndex = b.create<arith::AddIOp>(bodyLoc, linearIndex, term);
             }
-            Value value = b.create<tensor::ExtractOp>(bodyLoc, sourceTensor,
-                                                      ValueRange{linearIndex});
+            Value element = b.create<memref::ReinterpretCastOp>(
+                bodyLoc, scalarType, memRefPtr, getAsOpFoldResult(linearIndex),
+                ArrayRef<OpFoldResult>{}, ArrayRef<OpFoldResult>{});
+            Value value = b.create<memref::LoadOp>(bodyLoc, element, ValueRange{});
             b.create<linalg::YieldOp>(bodyLoc, value);
           });
 

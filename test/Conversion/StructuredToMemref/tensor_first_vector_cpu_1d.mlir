@@ -12,25 +12,25 @@
 
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @vector_add_tensor_first(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [16], strides: [1] : memref<*xf32> to memref<16xf32, strided<[1]>>
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [16], strides: [1] : memref<f32> to memref<16xf32, strided<[1]>>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[REINTERPRET_CAST_0]] restrict : memref<16xf32, strided<[1]>> to tensor<16xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [16], strides: [1] : memref<*xf32> to memref<16xf32, strided<[1]>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [16], strides: [1] : memref<f32> to memref<16xf32, strided<[1]>>
 // CHECK:           %[[TO_TENSOR_1:.*]] = bufferization.to_tensor %[[REINTERPRET_CAST_1]] restrict : memref<16xf32, strided<[1]>> to tensor<16xf32>
 // CHECK:           %[[GENERIC_0:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[TO_TENSOR_0]], %[[TO_TENSOR_1]] : tensor<16xf32>, tensor<16xf32>) outs(%[[TO_TENSOR_0]] : tensor<16xf32>) {
 // CHECK:           ^bb0(%[[VAL_0:.*]]: f32, %[[VAL_1:.*]]: f32, %[[VAL_2:.*]]: f32):
 // CHECK:             %[[ADDF_0:.*]] = arith.addf %[[VAL_0]], %[[VAL_1]] : f32
 // CHECK:             linalg.yield %[[ADDF_0]] : f32
 // CHECK:           } -> tensor<16xf32>
-// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: [0], sizes: [16], strides: [1] : memref<*xf32> to memref<16xf32, strided<[1]>>
+// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: [0], sizes: [16], strides: [1] : memref<f32> to memref<16xf32, strided<[1]>>
 // CHECK:           %[[CAST_0:.*]] = memref.cast %[[REINTERPRET_CAST_2]] : memref<16xf32, strided<[1]>> to memref<?xf32, strided<[?], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[CAST_0]] : (tensor<16xf32>, memref<?xf32, strided<[?], offset: ?>>) -> ()
 // CHECK:           return

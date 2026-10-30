@@ -29,7 +29,7 @@ module {
 
 // CHECK-DAG:   [[MAP_0_:#.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:  func.func @argmax_012
-// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<*xf32>, [[PARAM_1_:%.+]]: memref<*xi32>, [[PARAM_2_:%.+]]: i32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) {
+// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<f32>, [[PARAM_1_:%.+]]: memref<i32>, [[PARAM_2_:%.+]]: i32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) attributes {llvm.bareptr} {
 // CHECK-DAG:       [[CST_minus_1_:%.+]] = arith.constant -1 : i32
 // CHECK-DAG:       [[CST_0_:%.+]] = arith.constant 0xFF800000 : f32
 // CHECK-DAG:       [[VAR_0_:%.+]] = arith.muli [[PARAM_6_]], [[PARAM_2_]] : i32
@@ -42,7 +42,7 @@ module {
 // CHECK:             [[VAR_12_:%.+]] = arith.index_cast [[VAR_11_]] : index to i32
 // CHECK:             linalg.yield [[VAR_12_]] : i32
 // CHECK:           } -> tensor<4096xi32>
-// CHECK-DAG:       [[VAR_reinterpret_cast_:%.+]] = memref.reinterpret_cast [[PARAM_0_]] to offset: {{.}}[[VAR_1_]]{{.}}, sizes: [4096], strides: [1] : memref<*xf32> to memref<4096xf32, strided<[1], offset: ?>>
+// CHECK-DAG:       [[VAR_reinterpret_cast_:%.+]] = memref.reinterpret_cast [[PARAM_0_]] to offset: {{.}}[[VAR_1_]]{{.}}, sizes: [4096], strides: [1] : memref<f32> to memref<4096xf32, strided<[1], offset: ?>>
 // CHECK-DAG:       [[RES_:%.+]] = memref.alloc() : memref<4096xf32>
 // CHECK:           memref.copy [[VAR_reinterpret_cast_]], [[RES_]] : memref<4096xf32, strided<[1], offset: ?>> to memref<4096xf32>
 // CHECK-DAG:       [[VAR_4_:%.+]] = bufferization.to_tensor [[RES_]] restrict writable : memref<4096xf32>
@@ -65,7 +65,7 @@ module {
 // CHECK:             }
 // CHECK-DAG:       [[VAR_extracted_:%.+]] = tensor.extract [[VAR_reduced_]]#1[] : tensor<i32>
 // CHECK-DAG:       [[VAR_9_:%.+]] = arith.index_cast [[PARAM_6_]] : i32 to index
-// CHECK:           [[VAR_reinterpret_cast_0_:%.+]] = memref.reinterpret_cast [[PARAM_1_]] to offset: {{.}}[[VAR_9_]]{{.}}, sizes: [1], strides: [1] : memref<*xi32> to memref<1xi32, strided<[1], offset: ?>>
+// CHECK:           [[VAR_reinterpret_cast_0_:%.+]] = memref.reinterpret_cast [[PARAM_1_]] to offset: {{.}}[[VAR_9_]]{{.}}, sizes: [1], strides: [1] : memref<i32> to memref<1xi32, strided<[1], offset: ?>>
 // CHECK:           affine.store [[VAR_extracted_]], [[VAR_reinterpret_cast_0_]][0] : memref<1xi32, strided<[1], offset: ?>>
 // CHECK:           return
 // CHECK:         }
@@ -101,7 +101,7 @@ module {
 
 // CHECK-DAG:   [[MAP_0_:#.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:  func.func @argmin_012
-// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<*xf32>, [[PARAM_1_:%.+]]: memref<*xi32>, [[PARAM_2_:%.+]]: i32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) {
+// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<f32>, [[PARAM_1_:%.+]]: memref<i32>, [[PARAM_2_:%.+]]: i32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) attributes {llvm.bareptr} {
 // CHECK-DAG:       [[CST_minus_1_:%.+]] = arith.constant -1 : i32
 // CHECK-DAG:       [[CST_0_:%.+]] = arith.constant 0x7F800000 : f32
 // CHECK-DAG:       [[VAR_0_:%.+]] = arith.muli [[PARAM_6_]], [[PARAM_2_]] : i32
@@ -114,7 +114,7 @@ module {
 // CHECK:             [[VAR_12_:%.+]] = arith.index_cast [[VAR_11_]] : index to i32
 // CHECK:             linalg.yield [[VAR_12_]] : i32
 // CHECK:           } -> tensor<4096xi32>
-// CHECK-DAG:       [[VAR_reinterpret_cast_:%.+]] = memref.reinterpret_cast [[PARAM_0_]] to offset: {{.}}[[VAR_1_]]{{.}}, sizes: [4096], strides: [1] : memref<*xf32> to memref<4096xf32, strided<[1], offset: ?>>
+// CHECK-DAG:       [[VAR_reinterpret_cast_:%.+]] = memref.reinterpret_cast [[PARAM_0_]] to offset: {{.}}[[VAR_1_]]{{.}}, sizes: [4096], strides: [1] : memref<f32> to memref<4096xf32, strided<[1], offset: ?>>
 // CHECK-DAG:       [[RES_:%.+]] = memref.alloc() : memref<4096xf32>
 // CHECK:           memref.copy [[VAR_reinterpret_cast_]], [[RES_]] : memref<4096xf32, strided<[1], offset: ?>> to memref<4096xf32>
 // CHECK-DAG:       [[VAR_4_:%.+]] = bufferization.to_tensor [[RES_]] restrict writable : memref<4096xf32>
@@ -137,7 +137,7 @@ module {
 // CHECK:             }
 // CHECK-DAG:       [[VAR_extracted_:%.+]] = tensor.extract [[VAR_reduced_]]#1[] : tensor<i32>
 // CHECK-DAG:       [[VAR_9_:%.+]] = arith.index_cast [[PARAM_6_]] : i32 to index
-// CHECK:           [[VAR_reinterpret_cast_0_:%.+]] = memref.reinterpret_cast [[PARAM_1_]] to offset: {{.}}[[VAR_9_]]{{.}}, sizes: [1], strides: [1] : memref<*xi32> to memref<1xi32, strided<[1], offset: ?>>
+// CHECK:           [[VAR_reinterpret_cast_0_:%.+]] = memref.reinterpret_cast [[PARAM_1_]] to offset: {{.}}[[VAR_9_]]{{.}}, sizes: [1], strides: [1] : memref<i32> to memref<1xi32, strided<[1], offset: ?>>
 // CHECK:           affine.store [[VAR_extracted_]], [[VAR_reinterpret_cast_0_]][0] : memref<1xi32, strided<[1], offset: ?>>
 // CHECK:           return
 // CHECK:         }

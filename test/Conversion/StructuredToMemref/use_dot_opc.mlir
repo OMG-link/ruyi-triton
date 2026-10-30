@@ -11,23 +11,23 @@
 // RUN: triton-shared-opt --split-input-file --triton-to-linalg-experimental %s | FileCheck %s
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0, d1) -> (d0, d1)>
 // CHECK-LABEL:   func.func @kernel(
-// CHECK-SAME:                      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xbf16>,
-// CHECK-SAME:                      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xbf16>,
-// CHECK-SAME:                      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xbf16>,
+// CHECK-SAME:                      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<bf16>,
+// CHECK-SAME:                      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<bf16>,
+// CHECK-SAME:                      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<bf16>,
 // CHECK-SAME:                      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:                      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:                      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 0.000000e+00 : bf16
 // CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<128x256xbf16>
 // CHECK:           %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_0]] : bf16) outs(%[[EMPTY_0]] : tensor<128x256xbf16>) -> tensor<128x256xbf16>
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [128, 64], strides: [128, 1] : memref<*xbf16> to memref<128x64xbf16, strided<[128, 1]>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [128, 64], strides: [128, 1] : memref<bf16> to memref<128x64xbf16, strided<[128, 1]>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<128x64xbf16>
 // CHECK:           memref.copy %[[REINTERPRET_CAST_0]], %[[ALLOC_0]] : memref<128x64xbf16, strided<[128, 1]>> to memref<128x64xbf16>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<128x64xbf16> to tensor<128x64xbf16>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [64, 256], strides: [256, 1] : memref<*xbf16> to memref<64x256xbf16, strided<[256, 1]>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [64, 256], strides: [256, 1] : memref<bf16> to memref<64x256xbf16, strided<[256, 1]>>
 // CHECK:           %[[ALLOC_1:.*]] = memref.alloc() : memref<64x256xbf16>
 // CHECK:           memref.copy %[[REINTERPRET_CAST_1]], %[[ALLOC_1]] : memref<64x256xbf16, strided<[256, 1]>> to memref<64x256xbf16>
 // CHECK:           %[[TO_TENSOR_1:.*]] = bufferization.to_tensor %[[ALLOC_1]] restrict writable : memref<64x256xbf16> to tensor<64x256xbf16>
@@ -37,7 +37,7 @@
 // CHECK:             %[[ADDF_0:.*]] = arith.addf %[[VAL_0]], %[[VAL_1]] : bf16
 // CHECK:             linalg.yield %[[ADDF_0]] : bf16
 // CHECK:           } -> tensor<128x256xbf16>
-// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: [0], sizes: [128, 256], strides: [256, 1] : memref<*xbf16> to memref<128x256xbf16, strided<[256, 1]>>
+// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: [0], sizes: [128, 256], strides: [256, 1] : memref<bf16> to memref<128x256xbf16, strided<[256, 1]>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_2]] : (tensor<128x256xbf16>, memref<128x256xbf16, strided<[256, 1]>>) -> ()
 // CHECK:           bufferization.materialize_in_destination %[[FILL_0]] in writable %[[REINTERPRET_CAST_2]] : (tensor<128x256xbf16>, memref<128x256xbf16, strided<[256, 1]>>) -> ()
 // CHECK:           return

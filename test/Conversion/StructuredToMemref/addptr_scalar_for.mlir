@@ -11,8 +11,8 @@
 // RUN: triton-shared-opt --triton-to-linalg-experimental %s | FileCheck %s
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @kernel(
-// CHECK-SAME:                      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32> {tt.divisibility = 16 : i32},
-// CHECK-SAME:                      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32> {tt.divisibility = 16 : i32},
+// CHECK-SAME:                      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32> {tt.divisibility = 16 : i32},
+// CHECK-SAME:                      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32> {tt.divisibility = 16 : i32},
 // CHECK-SAME:                      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -21,7 +21,7 @@
 // CHECK-SAME:                      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:                      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:                      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 3 : index
 // CHECK:           %[[CONSTANT_2:.*]] = arith.constant 12 : index
@@ -31,7 +31,7 @@
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG8]], %[[ARG2]] : i32
 // CHECK:           %[[INDEX_CAST_0:.*]] = arith.index_cast %[[MULI_0]] : i32 to index
 // CHECK:           %[[FOR_0:.*]]:2 = scf.for %[[VAL_0:.*]] = %[[CONSTANT_3]] to %[[CONSTANT_2]] step %[[CONSTANT_1]] iter_args(%[[VAL_1:.*]] = %[[INDEX_CAST_0]], %[[VAL_2:.*]] = %[[FILL_0]]) -> (index, tensor<1024xf32>) {
-// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[VAL_1]]], sizes: [1024], strides: [1] : memref<*xf32> to memref<1024xf32, strided<[1], offset: ?>>
+// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[VAL_1]]], sizes: [1024], strides: [1] : memref<f32> to memref<1024xf32, strided<[1], offset: ?>>
 // CHECK:             %[[ALLOC_0:.*]] = memref.alloc() : memref<1024xf32>
 // CHECK:             memref.copy %[[REINTERPRET_CAST_0]], %[[ALLOC_0]] : memref<1024xf32, strided<[1], offset: ?>> to memref<1024xf32>
 // CHECK:             %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<1024xf32> to tensor<1024xf32>
@@ -52,7 +52,7 @@
 // CHECK:           }
 // CHECK:           %[[MULI_1:.*]] = arith.muli %[[ARG8]], %[[ARG3]] : i32
 // CHECK:           %[[INDEX_CAST_3:.*]] = arith.index_cast %[[MULI_1]] : i32 to index
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_3]]], sizes: [1024], strides: [1] : memref<*xf32> to memref<1024xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_3]]], sizes: [1024], strides: [1] : memref<f32> to memref<1024xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[VAL_8:.*]]#1 in writable %[[REINTERPRET_CAST_1]] : (tensor<1024xf32>, memref<1024xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }

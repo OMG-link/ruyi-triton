@@ -14,13 +14,13 @@ module {
 }
 
 // CHECK: module {
-// CHECK:   func.func @_sum_combine__fp32(%arg0: memref<*xf32>, %arg1: i32, %arg2: i32, %arg3: i32, %arg4: i32, %arg5: i32, %arg6: i32) -> f32 {
+// CHECK:   func.func @_sum_combine__fp32(%arg0: memref<f32>, %arg1: i32, %arg2: i32, %arg3: i32, %arg4: i32, %arg5: i32, %arg6: i32) -> f32 attributes {llvm.bareptr} {
 // CHECK:     %cst = arith.constant 4.200000e+01 : f32
 // CHECK:     return %cst : f32
 // CHECK:   }
-// CHECK:   func.func @test(%arg0: memref<*xf32>, %arg1: memref<*xf32>, %arg2: i32, %arg3: i32, %arg4: i32, %arg5: i32, %arg6: i32, %arg7: i32) -> f32 {
-// CHECK:     %0 = call @_sum_combine__fp32(%arg0, %arg2, %arg3, %arg4, %arg5, %arg6, %arg7) : (memref<*xf32>, i32, i32, i32, i32, i32, i32) -> f32
-// CHECK:     %1 = call @_sum_combine__fp32(%arg1, %arg2, %arg3, %arg4, %arg5, %arg6, %arg7) : (memref<*xf32>, i32, i32, i32, i32, i32, i32) -> f32
+// CHECK:   func.func @test(%arg0: memref<f32>, %arg1: memref<f32>, %arg2: i32, %arg3: i32, %arg4: i32, %arg5: i32, %arg6: i32, %arg7: i32) -> f32 attributes {llvm.bareptr} {
+// CHECK:     %0 = call @_sum_combine__fp32(%arg0, %arg2, %arg3, %arg4, %arg5, %arg6, %arg7) : (memref<f32>, i32, i32, i32, i32, i32, i32) -> f32
+// CHECK:     %1 = call @_sum_combine__fp32(%arg1, %arg2, %arg3, %arg4, %arg5, %arg6, %arg7) : (memref<f32>, i32, i32, i32, i32, i32, i32) -> f32
 // CHECK:     %2 = arith.addf %0, %1 : f32
 // CHECK:     return %2 : f32
 // CHECK:   }

@@ -9,16 +9,14 @@
 // CHECK-SAME:                               %[[VAL_2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>) attributes {noinline = false} {
 // CHECK-DAG:       %[[BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_0]] : !tt.ptr<f32> to memref<*xf32>
 // CHECK-DAG:       %[[INDEX_BASE:.*]] = builtin.unrealized_conversion_cast %[[VAL_1]] : !tt.ptr<i32> to memref<*xi32>
-// CHECK:           %[[SOURCE_LENGTH:.*]] = memref.dim %[[BASE]], %{{.*}} : memref<*xf32>
-// CHECK:           %[[SOURCE_MEMREF:.*]] = memref.reinterpret_cast %[[BASE]] to offset: [0], sizes: [%[[SOURCE_LENGTH]]], strides: [1] : memref<*xf32> to memref<?xf32>
-// CHECK:           %[[SOURCE_TENSOR:.*]] = bufferization.to_tensor %[[SOURCE_MEMREF]] restrict : memref<?xf32> to tensor<?xf32>
 // CHECK:           %[[EMPTY:.*]] = tensor.empty() : tensor<8x8xf32>
 // CHECK:           %[[RESULT:.*]] = linalg.generic {indexing_maps = [#[[$GATHER_MAP]], #[[$OUTPUT_MAP]]], iterator_types = ["parallel", "parallel"]} ins(%{{.*}} : tensor<8xi32>) outs(%[[EMPTY]] : tensor<8x8xf32>) {
 // CHECK:             ^bb0(%[[GATHER_INDEX:.*]]: i32, %{{.*}}: f32):
 // CHECK:               %[[GATHER_INDEX_INDEX:.*]] = arith.index_cast %[[GATHER_INDEX]] : i32 to index
 // CHECK:               %{{.*}} = linalg.index 1 : index
 // CHECK:               %{{.*}} = arith.addi %[[GATHER_INDEX_INDEX]], %{{.*}} : index
-// CHECK:               %{{.*}} = tensor.extract %[[SOURCE_TENSOR]][%{{.*}}] : tensor<?xf32>
+// CHECK:               %[[ELEMENT:.*]] = memref.reinterpret_cast %[[BASE]] to offset: [%{{.*}}], sizes: [], strides: [] : memref<*xf32> to memref<f32, strided<[], offset: ?>>
+// CHECK:               %{{.*}} = memref.load %[[ELEMENT]][] : memref<f32, strided<[], offset: ?>>
 // CHECK:               linalg.yield %{{.*}} : f32
 // CHECK:           } -> tensor<8x8xf32>
 // CHECK:           %[[DEST:.*]] = builtin.unrealized_conversion_cast %[[VAL_2]] : !tt.ptr<f32> to memref<*xf32>

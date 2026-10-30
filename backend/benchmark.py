@@ -15,10 +15,6 @@ from triton.runtime.cache import get_cache_manager
 from triton.testing import _summarize_statistics
 
 
-class _Mem(ctypes.Structure):
-    _fields_ = [("allocated", ctypes.c_void_p), ("aligned", ctypes.c_void_p), ("offset", ctypes.c_int64)]
-
-
 def _cpp_type(ty):
     return driver._ty_to_cpp(ty)
 
@@ -31,8 +27,8 @@ def _build_benchmark(compiled, signature, constants):
     slot_types = []
     for i, ty in runtime:
         if ty.startswith("*"):
-            fields.append(f"  Mem arg{i};")
-            call_args.append(f"0, &slots[s].arg{i}")
+            fields.append(f"  void *arg{i};")
+            call_args.append(f"slots[s].arg{i}")
             slot_types.append((i, "pointer", ty))
         else:
             fields.append(f"  {_cpp_type(ty)} arg{i};")
@@ -41,13 +37,12 @@ def _build_benchmark(compiled, signature, constants):
     kernel_name = compiled.metadata.name
     param_decls = []
     for i, ty in runtime:
-        param_decls.extend(["int64_t", "void*"] if ty.startswith("*") else [_cpp_type(ty)])
+        param_decls.append(_cpp_type(ty))
     params = ", ".join(param_decls + ["int", "int", "int", "int", "int", "int"])
     call_args = ", ".join(call_args + ["gx", "gy", "gz", "x", "y", "z"])
     src = f'''#include <chrono>
 #include "ExecutionEngine/CRunnerUtils.h"
 #include "ExecutionEngine/CRunnerUtils.cpp"
-struct Mem {{ void *allocated; void *aligned; int64_t offset; }};
 struct Slot {{
 {os.linesep.join(fields)}
 }};
@@ -90,7 +85,7 @@ extern "C" void benchmark(Slot *slots, int count, int gx, int gy, int gz,
             subprocess.check_call(cmd)
             so_path = cache.put(so.read_bytes(), name + ".so", binary=True)
     lib = ctypes.CDLL(so_path)
-    struct_fields = [(f"arg{i}", _Mem if kind == "pointer" else {
+    struct_fields = [(f"arg{i}", ctypes.c_void_p if kind == "pointer" else {
         "i1": ctypes.c_int32, "i8": ctypes.c_int8, "i16": ctypes.c_int16,
         "i32": ctypes.c_int32, "i64": ctypes.c_int64, "u1": ctypes.c_uint32,
         "u8": ctypes.c_uint8, "u16": ctypes.c_uint16, "u32": ctypes.c_uint32,
@@ -192,7 +187,7 @@ def do_bench_program(kernel, args, *, constexprs=None, grid, pool_bytes=64 << 20
         for i, kind, ty in slot_types:
             value = slot_args[runtime_indices.index(i)]
             if kind == "pointer":
-                setattr(native_slots[n], f"arg{i}", _Mem(value.data_ptr(), value.data_ptr(), 0))
+                setattr(native_slots[n], f"arg{i}", value.data_ptr())
             else:
                 setattr(native_slots[n], f"arg{i}", value)
     output = (ctypes.c_double * repeat_rounds)()

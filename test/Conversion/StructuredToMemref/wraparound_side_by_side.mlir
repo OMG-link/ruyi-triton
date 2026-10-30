@@ -11,8 +11,8 @@
 // RUN: triton-shared-opt --split-input-file --triton-to-linalg-experimental %s | FileCheck %s
 
 // CHECK-LABEL:   func.func @wrap_side_by_side_masked_loop_01234567(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -24,7 +24,7 @@
 // CHECK-SAME:      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG11:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG12:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG13:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG13:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 1 : index
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 4 : index
 // CHECK:           %[[CONSTANT_2:.*]] = arith.constant 4 : i32
@@ -64,8 +64,8 @@
 // CHECK:             %[[MINSI_0:.*]] = arith.minsi %[[ADDI_1]], %[[MULI_2]] : index
 // CHECK:             %[[SUBI_1:.*]] = arith.subi %[[MINSI_0]], %[[SELECT_3]] : index
 // CHECK:             %[[SUBI_2:.*]] = arith.subi %[[CONSTANT_1]], %[[SUBI_1]] : index
-// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_0]]], sizes: [4, %[[SUBI_1]]], strides: {{\[}}%[[INDEX_CAST_0]], %[[INDEX_CAST_2]]] : memref<*xf32> to memref<4x?xf32, strided<[?, ?], offset: ?>>
-// CHECK:             %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[SUBI_0]]], sizes: [4, %[[SUBI_2]]], strides: {{\[}}%[[INDEX_CAST_0]], %[[INDEX_CAST_2]]] : memref<*xf32> to memref<4x?xf32, strided<[?, ?], offset: ?>>
+// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_0]]], sizes: [4, %[[SUBI_1]]], strides: {{\[}}%[[INDEX_CAST_0]], %[[INDEX_CAST_2]]] : memref<f32> to memref<4x?xf32, strided<[?, ?], offset: ?>>
+// CHECK:             %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[SUBI_0]]], sizes: [4, %[[SUBI_2]]], strides: {{\[}}%[[INDEX_CAST_0]], %[[INDEX_CAST_2]]] : memref<f32> to memref<4x?xf32, strided<[?, ?], offset: ?>>
 // CHECK:             %[[EMPTY_0:.*]] = tensor.empty() : tensor<4x4xf32>
 // CHECK:             %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_8]] : f32) outs(%[[EMPTY_0]] : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK:             %[[DIM_0:.*]] = memref.dim %[[REINTERPRET_CAST_0]], %[[CONSTANT_0]] : memref<4x?xf32, strided<[?, ?], offset: ?>>
@@ -76,7 +76,7 @@
 // CHECK:             %[[TO_TENSOR_1:.*]] = bufferization.to_tensor %[[SUBVIEW_1]] restrict : memref<2x?xf32, strided<[?, ?], offset: ?>> to tensor<2x?xf32>
 // CHECK:             %[[INSERT_SLICE_0:.*]] = tensor.insert_slice %[[TO_TENSOR_0]] into %[[FILL_0]][0, 0] [2, %[[DIM_0]]] [1, 1] : tensor<2x?xf32> into tensor<4x4xf32>
 // CHECK:             %[[INSERT_SLICE_1:.*]] = tensor.insert_slice %[[TO_TENSOR_1]] into %[[INSERT_SLICE_0]][0, %[[DIM_0]]] [2, %[[DIM_1]]] [1, 1] : tensor<2x?xf32> into tensor<4x4xf32>
-// CHECK:             %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[VAL_2]]], sizes: [4, 4], strides: {{\[}}%[[INDEX_CAST_3]], %[[INDEX_CAST_4]]] : memref<*xf32> to memref<4x4xf32, strided<[?, ?], offset: ?>>
+// CHECK:             %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[VAL_2]]], sizes: [4, 4], strides: {{\[}}%[[INDEX_CAST_3]], %[[INDEX_CAST_4]]] : memref<f32> to memref<4x4xf32, strided<[?, ?], offset: ?>>
 // CHECK:             bufferization.materialize_in_destination %[[INSERT_SLICE_1]] in writable %[[REINTERPRET_CAST_2]] : (tensor<4x4xf32>, memref<4x4xf32, strided<[?, ?], offset: ?>>) -> ()
 // CHECK:             %[[ADDI_2:.*]] = arith.addi %[[VAL_1]], %[[INDEX_CAST_5]] : index
 // CHECK:             %[[ADDI_3:.*]] = arith.addi %[[VAL_2]], %[[INDEX_CAST_6]] : index

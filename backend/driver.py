@@ -197,14 +197,14 @@ def _generate_launcher(constants, signature, kernel_name):
     )
 
     kernel_arg_decls = ", ".join(
-        _ty_to_cpp(ty) if ty[0] != "*" else "int64_t, void*"
+        _ty_to_cpp(ty)
         for i, ty in signature.items()
         if ty != "constexpr"
     )
     kernel_arg_decls += ", " if kernel_arg_decls else ""
 
     kernel_parameters = ", ".join(
-        f"static_cast<{_ty_to_cpp(ty)}>(arg{i})" if ty[0] != "*" else f"0, &ptr_arg{i}"
+        f"static_cast<{_ty_to_cpp(ty)}>(arg{i})" if ty[0] != "*" else f"arg{i}"
         for i, ty in signature.items()
         if ty != "constexpr"
     )
@@ -232,8 +232,7 @@ def _generate_launcher(constants, signature, kernel_name):
 #include "ExecutionEngine/CRunnerUtils.cpp"
 
 extern "C" {{
-  // Pointer type (=Memref) becomes int64_t + MemRef struct
-  // FIXME: understand what this int64_t is used for.
+  // Each pointer argument uses the raw data-pointer ABI.
   void {kernel_name}({kernel_arg_decls}
                        int, int, int, int, int, int);
 }}
@@ -246,8 +245,6 @@ static void _launch(int gridX, int gridY, int gridZ, {arg_decls}) {{
     for(int x = 0; x < gridX; x++) {{
       for(int y = 0; y < gridY; y++) {{
         for(int z = 0; z < gridZ; z++) {{
-          // Use some random type "char" here.
-          {" ".join(f"StridedMemRefType<char, 0> ptr_arg{i} = {{static_cast<char *>(arg{i}), static_cast<char *>(arg{i}), 0}};" for i, ty in signature.items() if i not in constants and ty[0] == "*")}
           {kernel_name}({kernel_parameters}
                         gridX, gridY, gridZ, x, y, z);
         }}

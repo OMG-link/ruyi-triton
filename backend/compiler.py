@@ -582,58 +582,6 @@ def _optimize_llir(llir: str, options=None):
         # order and cannot vectorize these loops.
         llir = _enable_fadd_reassociation(llir)
 
-    # The launcher constructs unranked-memref descriptors on its stack and
-    # keeps them immutable for the complete kernel call. MLIR lowers access to
-    # the descriptor's aligned data pointer as a load through `arg + 8`, but
-    # LLVM cannot otherwise prove that stores through the loaded data pointer
-    # do not modify the descriptor itself. Mark just those descriptor-field
-    # loads invariant so LICM can hoist them and the loop vectorizer can see a
-    # normal contiguous load/store loop.
-    define = re.search(r"^define\b[^\n]*\((.*)\)[^{]*\{", llir, re.MULTILINE)
-    if define:
-        pointer_args = set(
-            re.findall(r"(?:^|,\s*)ptr(?:\s+[^,%]+)*\s+(%[-\w.]+)", define.group(1))
-        )
-        descriptor_fields = set()
-        for match in re.finditer(
-            r"^\s*(%[-\w.]+) = getelementptr(?: inbounds)? i8, "
-            r"ptr (%[-\w.]+), i64 8\s*$",
-            llir,
-            re.MULTILINE,
-        ):
-            if match.group(2) in pointer_args:
-                descriptor_fields.add(match.group(1))
-        # Before instcombine, the same second descriptor field is expressed
-        # as a one-element GEP on `ptr`. A constant index of one is specific to
-        # the two-pointer memref descriptor prefix; user data indexing remains
-        # variable or is typed by the pointee element.
-        for match in re.finditer(
-            r"^\s*(%[-\w.]+) = getelementptr(?: inbounds)? ptr, "
-            r"ptr (%[-\w.]+), i(?:32|64) 1\s*$",
-            llir,
-            re.MULTILINE,
-        ):
-            # Do not classify an arbitrary one-element user-data GEP as a
-            # descriptor field. It must be derived directly from a pointer
-            # argument of the generated kernel ABI.
-            if match.group(2) in pointer_args:
-                descriptor_fields.add(match.group(1))
-        if descriptor_fields:
-            metadata_ids = [
-                int(value) for value in re.findall(r"^!(\d+) =", llir, re.MULTILINE)
-            ]
-            invariant_id = max(metadata_ids, default=-1) + 1
-            fields = "|".join(re.escape(value) for value in descriptor_fields)
-            load_pattern = re.compile(
-                rf"^(\s*%[-\w.]+ = load ptr, ptr (?:{fields})[^\n]*)(?<!\binvariant\.load !\d)$",
-                re.MULTILINE,
-            )
-            llir, replacements = load_pattern.subn(
-                rf"\1, !invariant.load !{invariant_id}", llir
-            )
-            if replacements:
-                llir += f"\n!{invariant_id} = !{{}}\n"
-
     with tempfile.TemporaryDirectory() as tmpdir:
         src_path = os.path.join(tmpdir, "kernel.ll")
         dst_path = os.path.join(tmpdir, "kernel-opt.ll")

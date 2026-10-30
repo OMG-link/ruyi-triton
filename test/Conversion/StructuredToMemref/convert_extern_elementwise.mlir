@@ -13,16 +13,16 @@
 
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @atan2_kernel_0123(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG7]], %[[CONSTANT_0]] : i32
@@ -32,13 +32,13 @@
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
 // CHECK:           memref.copy %[[SUBVIEW_0]], %[[SUBVIEW_1]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<32xf32> to tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_1:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_2:.*]] = memref.subview %[[REINTERPRET_CAST_1]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_3:.*]] = memref.subview %[[ALLOC_1]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -49,10 +49,11 @@
 // CHECK:             %[[VAL_3:.*]] = math.atan2 %[[VAL_0]], %[[VAL_1]] : f32
 // CHECK:             linalg.yield %[[VAL_3]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_2]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_1:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @atan2_kernel_0123(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -79,18 +80,17 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_1:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @pow_kernel_0123(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG7]], %[[CONSTANT_0]] : i32
@@ -100,13 +100,13 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
 // CHECK:           memref.copy %[[SUBVIEW_0]], %[[SUBVIEW_1]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<32xf32> to tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_1:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_2:.*]] = memref.subview %[[REINTERPRET_CAST_1]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_3:.*]] = memref.subview %[[ALLOC_1]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -117,10 +117,11 @@ module {
 // CHECK:             %[[POWF_0:.*]] = math.powf %[[VAL_0]], %[[VAL_1]] : f32
 // CHECK:             linalg.yield %[[POWF_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_2]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_2:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @pow_kernel_0123(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -147,17 +148,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_2:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @fabs_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -167,7 +167,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -178,10 +178,11 @@ module {
 // CHECK:             %[[ABSF_0:.*]] = math.absf %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ABSF_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_3:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @fabs_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -206,17 +207,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_3:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @sin_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -226,7 +226,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -237,10 +237,11 @@ module {
 // CHECK:             %[[SIN_0:.*]] = math.sin %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[SIN_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_4:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @sin_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -265,17 +266,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_4:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @cos_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -285,7 +285,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -296,10 +296,11 @@ module {
 // CHECK:             %[[COS_0:.*]] = math.cos %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[COS_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_5:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @cos_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -324,17 +325,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_5:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @tan_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -344,7 +344,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -355,10 +355,11 @@ module {
 // CHECK:             %[[TAN_0:.*]] = math.tan %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[TAN_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_6:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @tan_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -383,17 +384,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_6:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @asin_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -403,7 +403,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -414,10 +414,11 @@ module {
 // CHECK:             %[[ASIN_0:.*]] = math.asin %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ASIN_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_7:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @asin_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -442,17 +443,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_7:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @acos_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -462,7 +462,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -473,10 +473,11 @@ module {
 // CHECK:             %[[ACOS_0:.*]] = math.acos %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ACOS_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_8:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @acos_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -501,17 +502,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_8:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @atan_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -521,7 +521,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -532,10 +532,11 @@ module {
 // CHECK:             %[[ATAN_0:.*]] = math.atan %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ATAN_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_9:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @atan_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -560,17 +561,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_9:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @sinh_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -580,7 +580,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -591,10 +591,11 @@ module {
 // CHECK:             %[[SINH_0:.*]] = math.sinh %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[SINH_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_10:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @sinh_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -619,17 +620,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_10:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @cosh_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -639,7 +639,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -650,10 +650,11 @@ module {
 // CHECK:             %[[COSH_0:.*]] = math.cosh %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[COSH_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_11:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @cosh_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -678,17 +679,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_11:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @tanh_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -698,7 +698,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -709,10 +709,11 @@ module {
 // CHECK:             %[[TANH_0:.*]] = math.tanh %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[TANH_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_12:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @tanh_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -737,17 +738,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_12:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @asinh_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -757,7 +757,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -768,10 +768,11 @@ module {
 // CHECK:             %[[ASINH_0:.*]] = math.asinh %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ASINH_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_13:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @asinh_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -796,17 +797,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_13:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @acosh_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -816,7 +816,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -827,10 +827,11 @@ module {
 // CHECK:             %[[ACOSH_0:.*]] = math.acosh %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ACOSH_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_14:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @acosh_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -855,17 +856,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_14:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @atanh_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -875,7 +875,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -886,10 +886,11 @@ module {
 // CHECK:             %[[ATANH_0:.*]] = math.atanh %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ATANH_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_15:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @atanh_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -914,17 +915,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_15:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @log_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -934,7 +934,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -945,10 +945,11 @@ module {
 // CHECK:             %[[LOG_0:.*]] = math.log %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[LOG_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_16:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @log_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -973,17 +974,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_16:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @log10_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -993,7 +993,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1004,10 +1004,11 @@ module {
 // CHECK:             %[[VAL_2:.*]] = math.log10 %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[VAL_2]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_17:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @log10_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1032,17 +1033,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_17:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @log1p_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1052,7 +1052,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1063,10 +1063,11 @@ module {
 // CHECK:             %[[VAL_2:.*]] = math.log1p %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[VAL_2]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_18:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @log1p_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1091,17 +1092,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_18:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @exp_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1111,7 +1111,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1122,10 +1122,11 @@ module {
 // CHECK:             %[[EXP_0:.*]] = math.exp %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[EXP_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_19:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @exp_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1150,17 +1151,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_19:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @exp2_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1170,7 +1170,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1181,10 +1181,11 @@ module {
 // CHECK:             %[[VAL_2:.*]] = math.exp2 %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[VAL_2]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_20:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @exp2_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1209,17 +1210,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_20:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @erf_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1229,7 +1229,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1240,10 +1240,11 @@ module {
 // CHECK:             %[[ERF_0:.*]] = math.erf %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[ERF_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_21:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @erf_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1268,17 +1269,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_21:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @sqrt_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1288,7 +1288,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1299,10 +1299,11 @@ module {
 // CHECK:             %[[SQRT_0:.*]] = math.sqrt %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[SQRT_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_22:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @sqrt_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1327,17 +1328,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_22:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @rsqrt_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1347,7 +1347,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1358,10 +1358,11 @@ module {
 // CHECK:             %[[RSQRT_0:.*]] = math.rsqrt %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[RSQRT_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_23:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @rsqrt_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1386,17 +1387,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_23:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @ceil_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1406,7 +1406,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1417,10 +1417,11 @@ module {
 // CHECK:             %[[CEIL_0:.*]] = math.ceil %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[CEIL_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_24:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @ceil_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1445,17 +1446,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_24:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @floor_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1465,7 +1465,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1476,10 +1476,11 @@ module {
 // CHECK:             %[[FLOOR_0:.*]] = math.floor %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[FLOOR_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
+// CHECK: #[[$ATTR_25:.+]] = affine_map<(d0) -> (d0)>
 module {
   tt.func public @floor_kernel_012(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32) attributes {noinline = false} {
     %c32_i32 = arith.constant 32 : i32
@@ -1504,17 +1505,16 @@ module {
 
 // -----
 
-// CHECK: #[[$ATTR_25:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @trunc_kernel_012(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 32 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 32 : index
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG6]], %[[CONSTANT_0]] : i32
@@ -1524,7 +1524,7 @@ module {
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[ADDI_0]], %[[INDEX_CAST_1]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_0]] : index
 // CHECK:           %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_0]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<32xf32>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<32xf32> to memref<?xf32, strided<[1]>>
@@ -1535,7 +1535,7 @@ module {
 // CHECK:             %[[TRUNC_0:.*]] = math.trunc %[[VAL_0]] : f32
 // CHECK:             linalg.yield %[[TRUNC_0]] : f32
 // CHECK:           } -> tensor<32xf32>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<*xf32> to memref<32xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [32], strides: [1] : memref<f32> to memref<32xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[GENERIC_0]] in writable %[[REINTERPRET_CAST_1]] : (tensor<32xf32>, memref<32xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }

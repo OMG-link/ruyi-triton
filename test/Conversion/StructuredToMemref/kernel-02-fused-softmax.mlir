@@ -12,8 +12,8 @@
 
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @softmax_kernel_012345(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xf32>,
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -22,7 +22,7 @@
 // CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 128 : index
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0 : index
 // CHECK:           %[[CONSTANT_2:.*]] = arith.constant 0xFF800000 : f32
@@ -32,7 +32,7 @@
 // CHECK:           %[[INDEX_CAST_1:.*]] = arith.index_cast %[[ARG4]] : i32 to index
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[INDEX_CAST_1]], %[[CONSTANT_0]] : index
 // CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[CONSTANT_1]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [128], strides: [1] : memref<*xf32> to memref<128xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [128], strides: [1] : memref<f32> to memref<128xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<128xf32>
 // CHECK:           %[[CMPI_0:.*]] = arith.cmpi slt, %[[MAXSI_0]], %[[CONSTANT_0]] : index
 // CHECK:           scf.if %[[CMPI_0]] {
@@ -77,7 +77,7 @@
 // CHECK:           } -> tensor<128xf32>
 // CHECK:           %[[MULI_1:.*]] = arith.muli %[[ARG8]], %[[ARG3]] : i32
 // CHECK:           %[[INDEX_CAST_2:.*]] = arith.index_cast %[[MULI_1]] : i32 to index
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_2]]], sizes: [128], strides: [1] : memref<*xf32> to memref<128xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[INDEX_CAST_2]]], sizes: [128], strides: [1] : memref<f32> to memref<128xf32, strided<[1], offset: ?>>
 // CHECK:           %[[EXTRACT_SLICE_0:.*]] = tensor.extract_slice %[[GENERIC_2]][0] {{\[}}%[[MAXSI_0]]] [1] : tensor<128xf32> to tensor<?xf32>
 // CHECK:           %[[SUBVIEW_2:.*]] = memref.subview %[[REINTERPRET_CAST_1]][0] {{\[}}%[[MAXSI_0]]] [1] : memref<128xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[EXTRACT_SLICE_0]] in writable %[[SUBVIEW_2]] : (tensor<?xf32>, memref<?xf32, strided<[1], offset: ?>>) -> ()

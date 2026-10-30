@@ -24,4 +24,4 @@ module {
   }
 }
 
-// CHECK:   func.func public @add_kernel_01234(%arg0: memref<*xf32>, %arg1: memref<*xf32>, %arg2: memref<*xf32>, %arg3: i32)
+// CHECK:   func.func public @add_kernel_01234(%arg0: memref<f32>, %arg1: memref<f32>, %arg2: memref<f32>, %arg3: i32)

@@ -82,12 +82,19 @@ static MemRefType getMemrefTypeForScalarPtr(triton::PointerType ptrType,
   return memrefType;
 }
 
-static Value getFlatMemref(Location loc, Value ptr, Type elementType,
-                           ConversionPatternRewriter &rewriter) {
-  return rewriter
-      .create<memref::CastOp>(
-          loc, MemRefType::get({ShapedType::kDynamic}, elementType), ptr)
-      .getResult();
+// Unstructured offsets describe individual addresses, not a shaped allocation.
+// Build one scalar view per access instead of casting an unknown-rank carrier
+// to a one-dimensional memref and reading nonexistent shape metadata.
+static Value getScalarMemref(Location loc, Value base, Value offset,
+                             OpBuilder &builder) {
+  auto baseType = cast<BaseMemRefType>(base.getType());
+  auto layout =
+      StridedLayoutAttr::get(builder.getContext(), ShapedType::kDynamic, {});
+  auto type = MemRefType::get({}, baseType.getElementType(), layout,
+                              baseType.getMemorySpace());
+  return builder.create<memref::ReinterpretCastOp>(
+      loc, type, base, getAsOpFoldResult(offset), ArrayRef<OpFoldResult>{},
+      ArrayRef<OpFoldResult>{});
 }
 
 static FailureOr<arith::AtomicRMWKind> getAtomicRMWKind(triton::RMWOp rmwOp,
@@ -126,8 +133,9 @@ static Value createAtomicRMWOp(Location loc, triton::RMWOp rmwOp, Value memref,
   auto kind = getAtomicRMWKind(rmwOp, newValue.getType());
   assert(succeeded(kind) && "unexpected atomic rmw op");
   return builder
-      .create<memref::AtomicRMWOp>(loc, *kind, newValue, memref,
-                                   ValueRange{index})
+      .create<memref::AtomicRMWOp>(loc, *kind, newValue,
+                                   getScalarMemref(loc, memref, index, builder),
+                                   ValueRange{})
       .getResult();
 }
 
@@ -235,7 +243,8 @@ static Value createMaskedLoadOrFallback(Location loc, Value mask,
                                         Value fallback, Value memref,
                                         Value index, OpBuilder &builder) {
   if (!mask) {
-    return builder.create<memref::LoadOp>(loc, memref, ValueRange{index});
+    return builder.create<memref::LoadOp>(
+        loc, getScalarMemref(loc, memref, index, builder), ValueRange{});
   }
 
   auto ifOp = builder.create<scf::IfOp>(loc, fallback.getType(), mask,
@@ -243,8 +252,8 @@ static Value createMaskedLoadOrFallback(Location loc, Value mask,
   {
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPointToStart(&ifOp.getThenRegion().front());
-    Value loaded =
-        builder.create<memref::LoadOp>(loc, memref, ValueRange{index});
+    Value loaded = builder.create<memref::LoadOp>(
+        loc, getScalarMemref(loc, memref, index, builder), ValueRange{});
     builder.create<scf::YieldOp>(loc, loaded);
   }
   {
@@ -386,15 +395,7 @@ struct GatherConverter : public OpConversionPattern<tts::GatherOp> {
     auto resultType =
         dyn_cast<RankedTensorType>(gatherOp.getResult().getType());
 
-    // Treat the base pointer (memref) as 1D because the offsets are all
-    // relative to a single base pointer (already collapsed).
-    auto baseMemref = rewriter
-                          .create<memref::CastOp>(
-                              loc,
-                              MemRefType::get({ShapedType::kDynamic},
-                                              resultType.getElementType()),
-                              ptr)
-                          .getResult();
+    Value baseMemref = ptr;
 
     Value resultTensor = rewriter.create<tensor::EmptyOp>(
         loc, resultType.getShape(), resultType.getElementType());
@@ -434,8 +435,9 @@ struct GatherConverter : public OpConversionPattern<tts::GatherOp> {
           value = createMaskedLoadOrFallback(nestedLoc, mask, fallback,
                                              baseMemref, index0, b);
         } else {
-          value = b.create<memref::LoadOp>(nestedLoc, baseMemref,
-                                           ValueRange{index0});
+          value = b.create<memref::LoadOp>(
+              nestedLoc, getScalarMemref(nestedLoc, baseMemref, index0, b),
+              ValueRange{});
         }
         return b.create<tensor::InsertOp>(nestedLoc, value, tensorAcc, indices)
             .getResult();
@@ -497,15 +499,7 @@ struct ScatterConverter : public OpConversionPattern<tts::ScatterOp> {
       return failure();
     }
 
-    // Treat the base pointer (memref) as 1D because the offsets are all
-    // relative to a single base pointer (already collapsed).
-    auto baseMemref =
-        rewriter
-            .create<memref::CastOp>(loc,
-                                    MemRefType::get({ShapedType::kDynamic},
-                                                    valueType.getElementType()),
-                                    ptr)
-            .getResult();
+    Value baseMemref = ptr;
 
     Value maskTensor = scatterOp.getMask() ? adaptor.getMask() : Value();
     if (maskTensor) {
@@ -546,8 +540,10 @@ struct ScatterConverter : public OpConversionPattern<tts::ScatterOp> {
         createOptionalMaskedStore(
             nestedLoc, maskValue,
             [&](OpBuilder &storeBuilder) {
-              storeBuilder.create<memref::StoreOp>(nestedLoc, value, baseMemref,
-                                                   ValueRange{index});
+              storeBuilder.create<memref::StoreOp>(
+                  nestedLoc, value,
+                  getScalarMemref(nestedLoc, baseMemref, index, storeBuilder),
+                  ValueRange{});
             },
             b);
         return;
@@ -587,7 +583,7 @@ struct AtomicRMWConverter : public OpConversionPattern<tts::AtomicRMWOp> {
 
     if (!offsetType) {
       auto resultType = atomicOp.getResult().getType();
-      Value baseMemref = getFlatMemref(loc, ptr, resultType, rewriter);
+      Value baseMemref = ptr;
       Value index = rewriter.create<arith::IndexCastOp>(
           loc, rewriter.getIndexType(), offset);
       Value fallback = createZeroValue(loc, resultType, rewriter);
@@ -624,8 +620,7 @@ struct AtomicRMWConverter : public OpConversionPattern<tts::AtomicRMWOp> {
       return failure();
     }
 
-    Value baseMemref =
-        getFlatMemref(loc, ptr, resultType.getElementType(), rewriter);
+    Value baseMemref = ptr;
 
     SmallVector<Value> loopBounds;
     SmallVector<Value> dynamicResultDims;
@@ -729,7 +724,7 @@ struct AtomicCASConverter : public OpConversionPattern<tts::AtomicCASOp> {
 
     if (!offsetType) {
       auto resultType = atomicOp.getResult().getType();
-      Value baseMemref = getFlatMemref(loc, ptr, resultType, rewriter);
+      Value baseMemref = ptr;
       Value index = rewriter.create<arith::IndexCastOp>(
           loc, rewriter.getIndexType(), offset);
       Value oldValue = createAtomicCASCall(loc, module, baseMemref, index, cmp,
@@ -745,8 +740,7 @@ struct AtomicCASConverter : public OpConversionPattern<tts::AtomicCASOp> {
       return failure();
     }
 
-    Value baseMemref =
-        getFlatMemref(loc, ptr, resultType.getElementType(), rewriter);
+    Value baseMemref = ptr;
 
     SmallVector<Value> loopBounds;
     SmallVector<Value> dynamicResultDims;

@@ -11,19 +11,19 @@
 // RUN: triton-shared-opt --triton-to-linalg-experimental %s | FileCheck %s
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @unsplat_kernel(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xi32> {maia.rank = 1 : i32, tt.divisibility = 16 : i32},
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<i32> {maia.rank = 1 : i32, tt.divisibility = 16 : i32},
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 42 : i32
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0 : index
 // CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<1xi32>
 // CHECK:           %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_0]] : i32) outs(%[[EMPTY_0]] : tensor<1xi32>) -> tensor<1xi32>
-// CHECK:           %[[CAST_0:.*]] = memref.cast %[[ARG0]] : memref<*xi32> to memref<?xi32>
-// CHECK:           %[[LOAD_0:.*]] = memref.load %[[CAST_0]]{{\[}}%[[CONSTANT_1]]] : memref<?xi32>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [], strides: [] : memref<i32> to memref<i32, strided<[]>>
+// CHECK:           %[[LOAD_0:.*]] = memref.load %[[REINTERPRET_CAST_0]][] : memref<i32, strided<[]>>
 // CHECK:           %[[INSERT_0:.*]] = tensor.insert %[[LOAD_0]] into %[[EMPTY_0]]{{\[}}%[[CONSTANT_1]]] : tensor<1xi32>
 // CHECK:           %[[EMPTY_1:.*]] = tensor.empty() : tensor<1xi1>
 // CHECK:           %[[GENERIC_0:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[INSERT_0]], %[[FILL_0]] : tensor<1xi32>, tensor<1xi32>) outs(%[[EMPTY_1]] : tensor<1xi1>) {
@@ -33,8 +33,8 @@
 // CHECK:           } -> tensor<1xi1>
 // CHECK:           %[[EXTRACT_0:.*]] = tensor.extract %[[GENERIC_0]]{{\[}}%[[CONSTANT_1]]] : tensor<1xi1>
 // CHECK:           scf.if %[[EXTRACT_0]] {
-// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [1], strides: [1] : memref<*xi32> to memref<1xi32, strided<[1]>>
-// CHECK:             affine.store %[[CONSTANT_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xi32, strided<[1]>>
+// CHECK:             %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [1], strides: [1] : memref<i32> to memref<1xi32, strided<[1]>>
+// CHECK:             affine.store %[[CONSTANT_0]], %[[REINTERPRET_CAST_1]][0] : memref<1xi32, strided<[1]>>
 // CHECK:           }
 // CHECK:           return
 // CHECK:         }

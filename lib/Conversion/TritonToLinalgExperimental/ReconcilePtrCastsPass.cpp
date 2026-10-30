@@ -88,17 +88,18 @@ struct FromMemrefConverter
     auto outType = output.getType();
 
     if (unrankedInput && isa<triton::PointerType, ptr::PtrType>(outType)) {
-      // from_memref only takes ranked memref, cast the unranked memref to
-      // ranked memref first.
-      auto rankedMemref = rewriter.create<memref::CastOp>(
-          op.getLoc(), MemRefType::get({1}, unrankedInput.getElementType()),
-          input);
-      auto memrefToPtr = rewriter.create<tptr::FromMemrefOp>(
-          op->getLoc(),
+      // This bridge recovers the storage base, matching ptr.to_ptr semantics:
+      // use the aligned pointer, not the address of logical element zero.
+      // Access offsets are represented separately by the pointer analysis and
+      // reinterpret_cast users. Do not invent a runtime rank to read the base.
+      auto address = rewriter.create<memref::ExtractAlignedPointerAsIndexOp>(
+          op.getLoc(), input);
+      auto memrefToPtr = rewriter.create<tptr::IntToPtrOp>(
+          op.getLoc(),
           ptr::PtrType::get(
               rewriter.getContext(),
               tptr::DefaultMemorySpaceAttr::get(rewriter.getContext())),
-          rankedMemref);
+          address);
 
       rewriter.replaceAllUsesWith(output, memrefToPtr);
       rewriter.eraseOp(op);

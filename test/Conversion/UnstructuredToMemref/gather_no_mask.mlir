@@ -32,21 +32,21 @@
 // CHECK:             %[[REMSI_0:.*]] = arith.remsi %[[ADDI_0]], %[[CONSTANT_5]] : i32
 // CHECK:             %[[SPLAT_0:.*]] = tt.splat %[[REMSI_0]] : i32 -> tensor<64xi32>
 // CHECK:             %[[ADDI_1:.*]] = arith.addi %[[DIVSI_0]], %[[SPLAT_0]] : tensor<64xi32>
-// CHECK:             %[[CAST_0:.*]] = memref.cast %[[UNREALIZED_CONVERSION_CAST_1]] : memref<*xf32> to memref<?xf32>
 // CHECK:             %[[EMPTY_0:.*]] = tensor.empty() : tensor<64xf32>
 // CHECK:             %[[FOR_1:.*]] = scf.for %[[VAL_3:.*]] = %[[CONSTANT_1]] to %[[CONSTANT_2]] step %[[CONSTANT_0]] iter_args(%[[VAL_4:.*]] = %[[EMPTY_0]]) -> (tensor<64xf32>) {
 // CHECK:               %[[EXTRACT_0:.*]] = tensor.extract %[[ADDI_1]]{{\[}}%[[VAL_3]]] : tensor<64xi32>
 // CHECK:               %[[INDEX_CAST_0:.*]] = arith.index_cast %[[EXTRACT_0]] : i32 to index
-// CHECK:               %[[LOAD_0:.*]] = memref.load %[[CAST_0]]{{\[}}%[[INDEX_CAST_0]]] : memref<?xf32>
+// CHECK:               %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[UNREALIZED_CONVERSION_CAST_1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [], strides: [] : memref<*xf32> to memref<f32, strided<[], offset: ?>>
+// CHECK:               %[[LOAD_0:.*]] = memref.load %[[REINTERPRET_CAST_0]][] : memref<f32, strided<[], offset: ?>>
 // CHECK:               %[[INSERT_0:.*]] = tensor.insert %[[LOAD_0]] into %[[VAL_4]]{{\[}}%[[VAL_3]]] : tensor<64xf32>
 // CHECK:               scf.yield %[[INSERT_0]] : tensor<64xf32>
 // CHECK:             }
-// CHECK:             %[[CAST_1:.*]] = memref.cast %[[UNREALIZED_CONVERSION_CAST_0]] : memref<*xf32> to memref<?xf32>
 // CHECK:             scf.for %[[VAL_5:.*]] = %[[CONSTANT_1]] to %[[CONSTANT_2]] step %[[CONSTANT_0]] {
 // CHECK:               %[[EXTRACT_1:.*]] = tensor.extract %[[VAL_2]]{{\[}}%[[VAL_5]]] : tensor<64xi32>
 // CHECK:               %[[INDEX_CAST_1:.*]] = arith.index_cast %[[EXTRACT_1]] : i32 to index
 // CHECK:               %[[EXTRACT_2:.*]] = tensor.extract %[[FOR_1]]{{\[}}%[[VAL_5]]] : tensor<64xf32>
-// CHECK:               memref.store %[[EXTRACT_2]], %[[CAST_1]]{{\[}}%[[INDEX_CAST_1]]] : memref<?xf32>
+// CHECK:               %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[UNREALIZED_CONVERSION_CAST_0]] to offset: {{\[}}%[[INDEX_CAST_1]]], sizes: [], strides: [] : memref<*xf32> to memref<f32, strided<[], offset: ?>>
+// CHECK:               memref.store %[[EXTRACT_2]], %[[REINTERPRET_CAST_1]][] : memref<f32, strided<[], offset: ?>>
 // CHECK:             }
 // CHECK:             %[[ADDI_2:.*]] = arith.addi %[[ADDI_1]], %[[CONSTANT_6]] : tensor<64xi32>
 // CHECK:             %[[ADDI_3:.*]] = arith.addi %[[VAL_2]], %[[CONSTANT_6]] : tensor<64xi32>

@@ -29,41 +29,55 @@ module {
   }
 }
 
-// CHECK:         tt.func public @masked_gather_scatter([[PARAM_0_:%.+]]: !tt.ptr<f32>, [[PARAM_1_:%.+]]: !tt.ptr<f32>) attributes {noinline = false} {
-// CHECK-DAG:       [[VAR_cst_:%.+]] = arith.constant dense<3> : tensor<4xi32>
-// CHECK-DAG:       [[VAR_cst_0_:%.+]] = arith.constant dense<64> : tensor<4xi32>
-// CHECK-DAG:       [[VAR_cst_1_:%.+]] = arith.constant dense<4> : tensor<4xi32>
-// CHECK-DAG:       [[CST_2_:%.+]] = arith.constant 2 : i32
-// CHECK-DAG:       [[CST_1_:%.+]] = arith.constant 1 : i32
-// CHECK-DAG:       [[CST_0_:%.+]] = arith.constant 0 : i32
-// CHECK-DAG:       [[CST_9_dot_900000_:%.+]] = arith.constant 9.900000e+01 : f32
-// CHECK-DAG:       [[VAR_0_:%.+]] = builtin.unrealized_conversion_cast [[PARAM_1_]] : !tt.ptr<f32> to memref<*xf32>
-// CHECK-DAG:       [[VAR_1_:%.+]] = builtin.unrealized_conversion_cast [[PARAM_0_]] : !tt.ptr<f32> to memref<*xf32>
-// CHECK-DAG:       [[VAR_2_:%.+]] = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
-// CHECK-NOT: separator of consecutive DAGs
-// CHECK-DAG:       [[VAR_3_:%.+]]:2 = scf.for [[VAR_arg2_:%.+]] = [[CST_0_]] to [[CST_2_]] step [[CST_1_]] iter_args([[VAR_arg3_:%.+]] = [[VAR_2_]], [[VAR_arg4_:%.+]] = [[VAR_2_]]) -> (tensor<4xi32>, tensor<4xi32>)  : i32 {
-// CHECK-DAG:         [[VAR_4_:%.+]] = arith.divsi [[VAR_arg3_]], [[VAR_cst_]] : tensor<4xi32>
-// CHECK-DAG:         [[VAR_5_:%.+]] = tt.splat [[VAR_arg2_]] : i32 -> tensor<4xi32>
-// CHECK:             [[VAR_6_:%.+]] = arith.addi [[VAR_4_]], [[VAR_5_]] : tensor<4xi32>
-// CHECK-DAG:         [[VAR_7_:%.+]] = arith.cmpi slt, [[VAR_6_]], [[VAR_cst_0_]] : tensor<4xi32>
-// CHECK-DAG:         [[VAR_cast_:%.+]] = memref.cast [[VAR_1_]] : memref<*xf32> to memref<?xf32>
-// CHECK:             scf.for
-// CHECK:               tensor.extract
-// CHECK:               scf.if
-// CHECK:                 memref.load
-// CHECK:               tensor.insert
-// CHECK:             [[VAR_cast_3_:%.+]] = memref.cast [[VAR_0_]] : memref<*xf32> to memref<?xf32>
-// CHECK:             scf.for [[VAR_ARG5:%.+]] =
-// CHECK:               [[VAR_OFFSET:%.+]] = tensor.extract [[VAR_6_]]{{.}}[[VAR_ARG5]]{{.}} : tensor<4xi32>
-// CHECK:               [[VAR_INDEX:%.+]] = arith.index_cast [[VAR_OFFSET]] : i32 to index
-// CHECK:               [[VAR_VALUE:%.+]] = tensor.extract {{.*}}{{.}}[[VAR_ARG5]]{{.}} : tensor<4xf32>
-// CHECK:               [[VAR_MASK:%.+]] = tensor.extract [[VAR_7_]]{{.}}[[VAR_ARG5]]{{.}} : tensor<4xi1>
-// CHECK:               scf.if [[VAR_MASK]] {
-// CHECK:                 memref.store [[VAR_VALUE]], [[VAR_cast_3_]]{{.}}[[VAR_INDEX]]{{.}} : memref<?xf32>
+// CHECK-LABEL:   tt.func public @masked_gather_scatter(
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>) attributes {noinline = false} {
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 1 : index
+// CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0 : index
+// CHECK:           %[[CONSTANT_2:.*]] = arith.constant 4 : index
+// CHECK:           %[[CONSTANT_3:.*]] = arith.constant dense<3> : tensor<4xi32>
+// CHECK:           %[[CONSTANT_4:.*]] = arith.constant dense<64> : tensor<4xi32>
+// CHECK:           %[[CONSTANT_5:.*]] = arith.constant dense<4> : tensor<4xi32>
+// CHECK:           %[[CONSTANT_6:.*]] = arith.constant 2 : i32
+// CHECK:           %[[CONSTANT_7:.*]] = arith.constant 1 : i32
+// CHECK:           %[[CONSTANT_8:.*]] = arith.constant 0 : i32
+// CHECK:           %[[CONSTANT_9:.*]] = arith.constant 9.900000e+01 : f32
+// CHECK:           %[[UNREALIZED_CONVERSION_CAST_0:.*]] = builtin.unrealized_conversion_cast %[[ARG1]] : !tt.ptr<f32> to memref<*xf32>
+// CHECK:           %[[UNREALIZED_CONVERSION_CAST_1:.*]] = builtin.unrealized_conversion_cast %[[ARG0]] : !tt.ptr<f32> to memref<*xf32>
+// CHECK:           %[[MAKE_RANGE_0:.*]] = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+// CHECK:           %[[FOR_0:.*]]:2 = scf.for %[[VAL_0:.*]] = %[[CONSTANT_8]] to %[[CONSTANT_6]] step %[[CONSTANT_7]] iter_args(%[[VAL_1:.*]] = %[[MAKE_RANGE_0]], %[[VAL_2:.*]] = %[[MAKE_RANGE_0]]) -> (tensor<4xi32>, tensor<4xi32>)  : i32 {
+// CHECK:             %[[DIVSI_0:.*]] = arith.divsi %[[VAL_1]], %[[CONSTANT_3]] : tensor<4xi32>
+// CHECK:             %[[SPLAT_0:.*]] = tt.splat %[[VAL_0]] : i32 -> tensor<4xi32>
+// CHECK:             %[[ADDI_0:.*]] = arith.addi %[[DIVSI_0]], %[[SPLAT_0]] : tensor<4xi32>
+// CHECK:             %[[CMPI_0:.*]] = arith.cmpi slt, %[[ADDI_0]], %[[CONSTANT_4]] : tensor<4xi32>
+// CHECK:             %[[EMPTY_0:.*]] = tensor.empty() : tensor<4xf32>
+// CHECK:             %[[FOR_1:.*]] = scf.for %[[VAL_3:.*]] = %[[CONSTANT_1]] to %[[CONSTANT_2]] step %[[CONSTANT_0]] iter_args(%[[VAL_4:.*]] = %[[EMPTY_0]]) -> (tensor<4xf32>) {
+// CHECK:               %[[EXTRACT_0:.*]] = tensor.extract %[[ADDI_0]]{{\[}}%[[VAL_3]]] : tensor<4xi32>
+// CHECK:               %[[INDEX_CAST_0:.*]] = arith.index_cast %[[EXTRACT_0]] : i32 to index
+// CHECK:               %[[EXTRACT_1:.*]] = tensor.extract %[[CMPI_0]]{{\[}}%[[VAL_3]]] : tensor<4xi1>
+// CHECK:               %[[IF_0:.*]] = scf.if %[[EXTRACT_1]] -> (f32) {
+// CHECK:                 %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[UNREALIZED_CONVERSION_CAST_1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [], strides: [] : memref<*xf32> to memref<f32, strided<[], offset: ?>>
+// CHECK:                 %[[LOAD_0:.*]] = memref.load %[[REINTERPRET_CAST_0]][] : memref<f32, strided<[], offset: ?>>
+// CHECK:                 scf.yield %[[LOAD_0]] : f32
+// CHECK:               } else {
+// CHECK:                 scf.yield %[[CONSTANT_9]] : f32
 // CHECK:               }
-// CHECK-DAG:         [[VAR_11_:%.+]] = arith.addi [[VAR_6_]], [[VAR_cst_1_]] : tensor<4xi32>
-// CHECK-DAG:         [[VAR_12_:%.+]] = arith.addi [[VAR_arg4_]], [[VAR_cst_1_]] : tensor<4xi32>
-// CHECK:             scf.yield [[VAR_11_]], [[VAR_12_]] : tensor<4xi32>, tensor<4xi32>
+// CHECK:               %[[INSERT_0:.*]] = tensor.insert %[[IF_0]] into %[[VAL_4]]{{\[}}%[[VAL_3]]] : tensor<4xf32>
+// CHECK:               scf.yield %[[INSERT_0]] : tensor<4xf32>
+// CHECK:             }
+// CHECK:             scf.for %[[VAL_5:.*]] = %[[CONSTANT_1]] to %[[CONSTANT_2]] step %[[CONSTANT_0]] {
+// CHECK:               %[[EXTRACT_2:.*]] = tensor.extract %[[ADDI_0]]{{\[}}%[[VAL_5]]] : tensor<4xi32>
+// CHECK:               %[[INDEX_CAST_1:.*]] = arith.index_cast %[[EXTRACT_2]] : i32 to index
+// CHECK:               %[[EXTRACT_3:.*]] = tensor.extract %[[FOR_1]]{{\[}}%[[VAL_5]]] : tensor<4xf32>
+// CHECK:               %[[EXTRACT_4:.*]] = tensor.extract %[[CMPI_0]]{{\[}}%[[VAL_5]]] : tensor<4xi1>
+// CHECK:               scf.if %[[EXTRACT_4]] {
+// CHECK:                 %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[UNREALIZED_CONVERSION_CAST_0]] to offset: {{\[}}%[[INDEX_CAST_1]]], sizes: [], strides: [] : memref<*xf32> to memref<f32, strided<[], offset: ?>>
+// CHECK:                 memref.store %[[EXTRACT_3]], %[[REINTERPRET_CAST_1]][] : memref<f32, strided<[], offset: ?>>
+// CHECK:               }
+// CHECK:             }
+// CHECK:             %[[ADDI_1:.*]] = arith.addi %[[ADDI_0]], %[[CONSTANT_5]] : tensor<4xi32>
+// CHECK:             %[[ADDI_2:.*]] = arith.addi %[[VAL_2]], %[[CONSTANT_5]] : tensor<4xi32>
+// CHECK:             scf.yield %[[ADDI_1]], %[[ADDI_2]] : tensor<4xi32>, tensor<4xi32>
 // CHECK:           }
 // CHECK:           tt.return
 // CHECK:         }

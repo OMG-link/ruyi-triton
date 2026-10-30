@@ -11,8 +11,8 @@
 // RUN: triton-shared-opt --triton-to-linalg-experimental="structured-ldst-mode=tensor-first-vector-cpu" %s | FileCheck %s
 
 // CHECK-LABEL:   func.func @kernel(
-// CHECK-SAME:                      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xbf16>,
-// CHECK-SAME:                      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<*xbf16>,
+// CHECK-SAME:                      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<bf16>,
+// CHECK-SAME:                      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<bf16>,
 // CHECK-SAME:                      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -20,7 +20,7 @@
 // CHECK-SAME:                      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:                      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:                      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) {
+// CHECK-SAME:                      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 2 : index
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant 130 : index
 // CHECK:           %[[CONSTANT_2:.*]] = arith.constant 259 : index
@@ -37,11 +37,11 @@
 // CHECK:           %[[SUBI_1:.*]] = arith.subi %[[MAXSI_1]], %[[CONSTANT_3]] : index
 // CHECK:           %[[MINSI_2:.*]] = arith.minsi %[[SUBI_0]], %[[CONSTANT_4]] : index
 // CHECK:           %[[MINSI_3:.*]] = arith.minsi %[[SUBI_1]], %[[CONSTANT_5]] : index
-// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [3074], sizes: [128, 256], strides: [1, 1024] : memref<*xbf16> to memref<128x256xbf16, strided<[1, 1024], offset: 3074>>
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [3074], sizes: [128, 256], strides: [1, 1024] : memref<bf16> to memref<128x256xbf16, strided<[1, 1024], offset: 3074>>
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0, 0] {{\[}}%[[MINSI_2]], %[[MINSI_3]]] [1, 1] : memref<128x256xbf16, strided<[1, 1024], offset: 3074>> to memref<?x?xbf16, strided<[1, 1024], offset: 3074>>
 // CHECK:           %[[CAST_0:.*]] = memref.cast %[[SUBVIEW_0]] : memref<?x?xbf16, strided<[1, 1024], offset: 3074>> to memref<?x?xbf16, strided<[1, 1024], offset: ?>>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[CAST_0]] restrict : memref<?x?xbf16, strided<[1, 1024], offset: ?>> to tensor<?x?xbf16>
-// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [3074], sizes: [128, 256], strides: [1, 1024] : memref<*xbf16> to memref<128x256xbf16, strided<[1, 1024], offset: 3074>>
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [3074], sizes: [128, 256], strides: [1, 1024] : memref<bf16> to memref<128x256xbf16, strided<[1, 1024], offset: 3074>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[REINTERPRET_CAST_1]][0, 0] {{\[}}%[[MINSI_2]], %[[MINSI_3]]] [1, 1] : memref<128x256xbf16, strided<[1, 1024], offset: 3074>> to memref<?x?xbf16, strided<[1, 1024], offset: 3074>>
 // CHECK:           %[[CAST_1:.*]] = memref.cast %[[SUBVIEW_1]] : memref<?x?xbf16, strided<[1, 1024], offset: 3074>> to memref<?x?xbf16, strided<[1, 1024], offset: ?>>
 // CHECK:           bufferization.materialize_in_destination %[[TO_TENSOR_0]] in writable %[[CAST_1]] : (tensor<?x?xbf16>, memref<?x?xbf16, strided<[1, 1024], offset: ?>>) -> ()

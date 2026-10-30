@@ -22,7 +22,10 @@ module {
   }
 }
 
-// CHECK:   func.func public @add_kernel_01234(%arg0: memref<*xf32>, %arg1: memref<*xf32>, %arg2: memref<*xf32>, %arg3: i32)
-// CHECK-DAG: builtin.unrealized_conversion_cast %arg2 : memref<*xf32> to !tt.ptr<f32>
-// CHECK-DAG: builtin.unrealized_conversion_cast %arg1 : memref<*xf32> to !tt.ptr<f32>
-// CHECK-DAG: builtin.unrealized_conversion_cast %arg0 : memref<*xf32> to !tt.ptr<f32>
+// CHECK:   func.func public @add_kernel_01234(%arg0: memref<f32>, %arg1: memref<f32>, %arg2: memref<f32>, %arg3: i32)
+// CHECK-DAG: %[[BASE2:.*]] = memref.cast %arg2 : memref<f32> to memref<*xf32>
+// CHECK-DAG: builtin.unrealized_conversion_cast %[[BASE2]] : memref<*xf32> to !tt.ptr<f32>
+// CHECK-DAG: %[[BASE1:.*]] = memref.cast %arg1 : memref<f32> to memref<*xf32>
+// CHECK-DAG: builtin.unrealized_conversion_cast %[[BASE1]] : memref<*xf32> to !tt.ptr<f32>
+// CHECK-DAG: %[[BASE0:.*]] = memref.cast %arg0 : memref<f32> to memref<*xf32>
+// CHECK-DAG: builtin.unrealized_conversion_cast %[[BASE0]] : memref<*xf32> to !tt.ptr<f32>

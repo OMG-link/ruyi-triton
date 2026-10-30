@@ -17,9 +17,9 @@ module {
 }
 
 // CHECK-LABEL:   func.func @kernel(
-// CHECK-SAME:  %[[VAL_0:.*]]: memref<*xbf16>, %[[VAL_1:.*]]: memref<*xbf16>, %[[VAL_2:.*]]: i32, %[[VAL_3:.*]]: i32, %[[VAL_4:.*]]: i32, %[[VAL_5:.*]]: i32, %[[VAL_6:.*]]: i32, %[[VAL_7:.*]]: i32) {
+// CHECK-SAME:  %[[VAL_0:.*]]: memref<bf16>, %[[VAL_1:.*]]: memref<bf16>, %[[VAL_2:.*]]: i32, %[[VAL_3:.*]]: i32, %[[VAL_4:.*]]: i32, %[[VAL_5:.*]]: i32, %[[VAL_6:.*]]: i32, %[[VAL_7:.*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[VAL_8:.*]] = arith.constant 0.000000e+00 : f32
-// CHECK:           %[[VAL_9:.*]] = memref.reinterpret_cast %[[VAL_0]] to offset: [0], sizes: [128], strides: [1] : memref<*xbf16> to memref<128xbf16, strided<[1]>>
+// CHECK:           %[[VAL_9:.*]] = memref.reinterpret_cast %[[VAL_0]] to offset: [0], sizes: [128], strides: [1] : memref<bf16> to memref<128xbf16, strided<[1]>>
 // CHECK:           %[[VAL_10:.*]] = memref.alloc() : memref<128xbf16>
 // CHECK:           memref.copy %[[VAL_9]], %[[VAL_10]] : memref<128xbf16, strided<[1]>> to memref<128xbf16>
 // CHECK:           %[[VAL_11:.*]] = bufferization.to_tensor %[[VAL_10]] restrict writable : memref<128xbf16> to tensor<128xbf16>
@@ -33,7 +33,7 @@ module {
 // CHECK:             }
 // CHECK:           %[[VAL_19:.*]] = tensor.extract %[[VAL_14]][] : tensor<f32>
 // CHECK:           %[[VAL_20:.*]] = arith.truncf %[[VAL_19]] : f32 to bf16
-// CHECK:           %[[VAL_21:.*]] = memref.reinterpret_cast %[[VAL_1]] to offset: [0], sizes: [1], strides: [1] : memref<*xbf16> to memref<1xbf16, strided<[1]>>
+// CHECK:           %[[VAL_21:.*]] = memref.reinterpret_cast %[[VAL_1]] to offset: [0], sizes: [1], strides: [1] : memref<bf16> to memref<1xbf16, strided<[1]>>
 // CHECK:           affine.store %[[VAL_20]], %[[VAL_21]][0] : memref<1xbf16, strided<[1]>>
 // CHECK:           return
 // CHECK:         }
