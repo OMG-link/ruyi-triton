@@ -1397,9 +1397,9 @@ PtrState PtrAnalysis::reconcileLoopPtrState(
   PtrState newState = state;
   int cnt = iterArgIndex + 1;
   if (newState.getRank() == 0) {
-    assert(newState.scalar);
-    // for scalar pointers, the scalar contains the offset and is the only
-    // relevant newState that could be updated by the loop.
+    // A base pointer may have an implicit zero offset (no scalar value).
+    // The structured loop carries that offset explicitly, so use its value
+    // even when the initial pointer state did not need an explicit offset.
     newState.scalar = getReplacementVal(forOp, cnt);
   } else {
     for (auto &offset : newState.offsets) {

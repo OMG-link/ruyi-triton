@@ -62,8 +62,9 @@ def test_euclidean_dist_kernel_emits_riscv_object(tmp_path, N, M, D):
     )
     assert re.search(r"<_euclidean_dist_kernel>:", asm)
     assert re.search(r"\bvsetivli\b", asm)
-    assert re.search(r"\bvle32\.v\b", asm)
-    assert re.search(r"\bvse32\.v\b", asm)
+    # Full-register transfers are also valid for fixed-size vector tiles.
+    assert re.search(r"\b(?:vle32\.v|vl[1248]re32\.v|vl[1248]r\.v)\b", asm)
+    assert re.search(r"\b(?:vse32\.v|vs[1248]r\.v)\b", asm)
 
 
 def test_euclidean_dist_shape_assertions():

@@ -83,6 +83,7 @@ def test_user_kernel_warmup_emits_riscv_ime_object(tmp_path):
     assert re.search(r"<smtime_i8_matmul>:", asm)
     assert len(re.findall(r"\bsmt\.vmadot\b", asm)) == 1
     assert "vsetvli" in asm
-    assert "vle8.v" in asm
-    assert "vle32.v" in asm
-    assert "vse32.v" in asm
+    # Full-register transfers are also valid for fixed-size vector tiles.
+    assert re.search(r"\b(?:vle8\.v|vl[1248]re8\.v|vl[1248]r\.v)\b", asm)
+    assert re.search(r"\b(?:vle32\.v|vl[1248]re32\.v|vl[1248]r\.v)\b", asm)
+    assert re.search(r"\b(?:vse32\.v|vs[1248]r\.v)\b", asm)

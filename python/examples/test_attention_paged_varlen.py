@@ -485,8 +485,9 @@ def test_attention_paged_varlen_kernel_emits_riscv_object(tmp_path, device, make
     )
     assert re.search(r"<_paged_varlen_kernel>:", asm)
     assert re.search(r"\bvsetivli\b", asm)
-    assert re.search(r"\bvle32\.v\b", asm)
-    assert re.search(r"\bvse32\.v\b", asm)
+    # Full-register transfers are also valid for fixed-size vector tiles.
+    assert re.search(r"\b(?:vle32\.v|vl[1248]re32\.v|vl[1248]r\.v)\b", asm)
+    assert re.search(r"\b(?:vse32\.v|vs[1248]r\.v)\b", asm)
     assert re.search(r"\b(?:vfmul\.vv|fmul\.s)\b", asm)
     assert re.search(r"\b(?:vfredosum\.vs|fadd\.s)\b", asm)
     assert re.search(r"\bfdiv\.s\b", asm)
