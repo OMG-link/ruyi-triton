@@ -3,12 +3,27 @@
 // This script is intended to make adding checks to a test case quick and easy.
 // It is *not* authoritative about what constitutes a good test. After using the
 // script, be sure to review and refine the generated checks. For example,
-// CHECK lines should be minimized and named to reflect the test’s intent.
 // For comprehensive guidelines, see:
 //   * https://mlir.llvm.org/getting_started/TestingGuide/
 
 
 // RUN: triton-shared-opt --triton-to-linalg-experimental %s | FileCheck %s
+module {
+  tt.func public @unsplat_kernel(%arg0: !tt.ptr<i32> {maia.rank = 1 : i32, tt.divisibility = 16 : i32}) attributes {noinline = false} {
+    %cst = arith.constant dense<42> : tensor<1xi32>
+    %c42_i32 = arith.constant 42 : i32
+    %0 = tt.splat %arg0 : !tt.ptr<i32> -> tensor<1x!tt.ptr<i32>>
+    %1 = tt.load %0 : tensor<1x!tt.ptr<i32>>
+    %2 = arith.cmpi sgt, %1, %cst : tensor<1xi32>
+    %3 = tt.unsplat %2 : tensor<1xi1>
+    scf.if %3 {
+      tt.store %arg0, %c42_i32 : !tt.ptr<i32>
+    }
+    tt.return
+  }
+}
+
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @unsplat_kernel(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<i32> {maia.rank = 1 : i32, tt.divisibility = 16 : i32},
@@ -38,17 +53,3 @@
 // CHECK:           }
 // CHECK:           return
 // CHECK:         }
-module {
-  tt.func public @unsplat_kernel(%arg0: !tt.ptr<i32> {maia.rank = 1 : i32, tt.divisibility = 16 : i32}) attributes {noinline = false} {
-    %cst = arith.constant dense<42> : tensor<1xi32>
-    %c42_i32 = arith.constant 42 : i32
-    %0 = tt.splat %arg0 : !tt.ptr<i32> -> tensor<1x!tt.ptr<i32>>
-    %1 = tt.load %0 : tensor<1x!tt.ptr<i32>>
-    %2 = arith.cmpi sgt, %1, %cst : tensor<1xi32>
-    %3 = tt.unsplat %2 : tensor<1xi1>
-    scf.if %3 {
-      tt.store %arg0, %c42_i32 : !tt.ptr<i32>
-    }
-    tt.return
-  }
-}

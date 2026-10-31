@@ -17,16 +17,32 @@ module {
   }
 }
 
-// CHECK-LABEL: func.func @reduce_kernel_2d_0d(
-// CHECK-SAME: [[BASE:%[a-zA-Z0-9_.$-]+]]: memref<f32> {tt.divisibility = 16 : i32}, {{.*}}) attributes {llvm.bareptr}
-// CHECK-DAG: [[ONE:%[a-zA-Z0-9_.$-]+]] = arith.constant 1 : i32
-// CHECK-DAG: [[EIGHT:%[a-zA-Z0-9_.$-]+]] = arith.constant 8 : i32
-// CHECK-DAG: [[ZERO:%[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
-// CHECK: [[RESULT:%[a-zA-Z0-9_.$-]+]] = scf.for [[IV:%[a-zA-Z0-9_.$-]+]] = [[ZERO]] to [[EIGHT]] step [[ONE]] iter_args([[OFFSET:%[a-zA-Z0-9_.$-]+]] = [[ZERO]]) -> (i32) : i32 {
-// CHECK: [[VALUE:%[a-zA-Z0-9_.$-]+]] = arith.sitofp [[IV]] : i32 to f32
-// CHECK: [[INDEX:%[a-zA-Z0-9_.$-]+]] = arith.index_cast [[OFFSET]] : i32 to index
-// CHECK: [[ELEMENT:%[a-zA-Z0-9_.$-]+]] = memref.reinterpret_cast [[BASE]] to offset: {{\[}}[[INDEX]]], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
-// CHECK: affine.store [[VALUE]], [[ELEMENT]][0] : memref<1xf32, strided<[1], offset: ?>>
-// CHECK: [[NEXT:%[a-zA-Z0-9_.$-]+]] = arith.addi [[OFFSET]], [[ONE]] : i32
-// CHECK: scf.yield [[NEXT]] : i32
-// CHECK: return
+// CHECK lines should be minimized and named to reflect the test’s intent.
+// CHECK-LABEL:   func.func @reduce_kernel_2d_0d(
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32> {tt.divisibility = 16 : i32},
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG11:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG12:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 1 : index
+// CHECK:           %[[CONSTANT_1:.*]] = arith.constant 1 : i32
+// CHECK:           %[[CONSTANT_2:.*]] = arith.constant 0 : i32
+// CHECK:           %[[CONSTANT_3:.*]] = arith.constant 8 : i32
+// CHECK:           %[[CONSTANT_4:.*]] = arith.constant 0 : index
+// CHECK:           %[[FOR_0:.*]] = scf.for %[[VAL_0:.*]] = %[[CONSTANT_2]] to %[[CONSTANT_3]] step %[[CONSTANT_1]] iter_args(%[[VAL_1:.*]] = %[[CONSTANT_4]]) -> (index)  : i32 {
+// CHECK:             %[[SITOFP_0:.*]] = arith.sitofp %[[VAL_0]] : i32 to f32
+// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[VAL_1]]], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
+// CHECK:             affine.store %[[SITOFP_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xf32, strided<[1], offset: ?>>
+// CHECK:             %[[ADDI_0:.*]] = arith.addi %[[VAL_1]], %[[CONSTANT_0]] : index
+// CHECK:             scf.yield %[[ADDI_0]] : index
+// CHECK:           }
+// CHECK:           return
+// CHECK:         }

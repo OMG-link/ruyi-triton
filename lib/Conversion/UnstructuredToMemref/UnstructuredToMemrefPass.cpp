@@ -20,6 +20,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
@@ -48,6 +49,12 @@ namespace {
 
 constexpr StringLiteral kAtomicCASHelperPrefix = "__triton_shared_atomic_cas_";
 
+static Value toIndex(Location loc, Value value, OpBuilder &builder) {
+  if (value.getType().isIndex())
+    return value;
+  return builder.create<arith::IndexCastOp>(loc, builder.getIndexType(), value);
+}
+
 static Type getMemRefElementTypeForPointer(triton::PointerType ptrType) {
   Type pointeeType = ptrType.getPointeeType();
   if (auto shapedType = dyn_cast<ShapedType>(pointeeType)) {
@@ -74,9 +81,12 @@ public:
 };
 
 static MemRefType getMemrefTypeForScalarPtr(triton::PointerType ptrType,
-                                            MLIRContext *context) {
+                                            MLIRContext *context,
+                                            Value offset) {
   SmallVector<int64_t> strides{1};
-  auto layout = StridedLayoutAttr::get(context, ShapedType::kDynamic, strides);
+  int64_t staticOffset =
+      getConstantIntValue(offset).value_or(ShapedType::kDynamic);
+  auto layout = StridedLayoutAttr::get(context, staticOffset, strides);
   auto elemType = ptrType.getPointeeType();
   auto memrefType = MemRefType::get({1}, elemType, layout);
   return memrefType;
@@ -88,8 +98,9 @@ static MemRefType getMemrefTypeForScalarPtr(triton::PointerType ptrType,
 static Value getScalarMemref(Location loc, Value base, Value offset,
                              OpBuilder &builder) {
   auto baseType = cast<BaseMemRefType>(base.getType());
-  auto layout =
-      StridedLayoutAttr::get(builder.getContext(), ShapedType::kDynamic, {});
+  auto layout = StridedLayoutAttr::get(
+      builder.getContext(),
+      getConstantIntValue(offset).value_or(ShapedType::kDynamic), {});
   auto type = MemRefType::get({}, baseType.getElementType(), layout,
                               baseType.getMemorySpace());
   return builder.create<memref::ReinterpretCastOp>(
@@ -300,14 +311,13 @@ struct ScalarLoadConverter : public OpConversionPattern<tts::GatherOp> {
     auto basePtr = adaptor.getPtr();
     auto offset = adaptor.getOffset();
 
-    Value loadIndex = rewriter.create<arith::IndexCastOp>(
-        loc, rewriter.getIndexType(), offset);
+    Value loadIndex = toIndex(loc, offset, rewriter);
 
     auto memref = rewriter.create<memref::ReinterpretCastOp>(
         loc,
         getMemrefTypeForScalarPtr(
             cast<triton::PointerType>(gatherOp.getPtr().getType()),
-            rewriter.getContext()),
+            rewriter.getContext(), loadIndex),
         basePtr, getAsOpFoldResult(loadIndex) /*offset*/,
         ArrayRef<OpFoldResult>{rewriter.getIndexAttr(1)} /*sizes*/,
         ArrayRef<OpFoldResult>{rewriter.getIndexAttr(1)} /*strides*/);
@@ -345,14 +355,13 @@ struct ScalarStoreConverter : public OpConversionPattern<tts::ScatterOp> {
     auto basePtr = adaptor.getPtr();
     auto offset = adaptor.getOffset();
 
-    Value storeIndex = rewriter.create<arith::IndexCastOp>(
-        loc, rewriter.getIndexType(), offset);
+    Value storeIndex = toIndex(loc, offset, rewriter);
 
     auto memref = rewriter.create<memref::ReinterpretCastOp>(
         loc,
         getMemrefTypeForScalarPtr(
             cast<triton::PointerType>(scatterOp.getPtr().getType()),
-            rewriter.getContext()),
+            rewriter.getContext(), storeIndex),
         basePtr, getAsOpFoldResult(storeIndex) /*offset*/,
         ArrayRef<OpFoldResult>{rewriter.getIndexAttr(1)} /*sizes*/,
         ArrayRef<OpFoldResult>{rewriter.getIndexAttr(1)} /*strides*/);
@@ -426,8 +435,7 @@ struct GatherConverter : public OpConversionPattern<tts::GatherOp> {
       if (dim == resultType.getRank()) {
         auto offset =
             b.create<tensor::ExtractOp>(nestedLoc, offsetTensor, indices);
-        Value index0 =
-            b.create<arith::IndexCastOp>(nestedLoc, b.getIndexType(), offset);
+        Value index0 = toIndex(nestedLoc, offset, b);
         Value value;
         if (gatherOp.getMask()) {
           Value mask = b.create<tensor::ExtractOp>(nestedLoc,
@@ -528,8 +536,7 @@ struct ScatterConverter : public OpConversionPattern<tts::ScatterOp> {
       if (dim == offsetRankedType.getRank()) {
         Value offsetValue =
             b.create<tensor::ExtractOp>(nestedLoc, offsetTensor, indices);
-        Value index = b.create<arith::IndexCastOp>(nestedLoc, b.getIndexType(),
-                                                   offsetValue);
+        Value index = toIndex(nestedLoc, offsetValue, b);
         Value value =
             b.create<tensor::ExtractOp>(nestedLoc, valueTensor, indices);
         Value maskValue =
@@ -584,8 +591,7 @@ struct AtomicRMWConverter : public OpConversionPattern<tts::AtomicRMWOp> {
     if (!offsetType) {
       auto resultType = atomicOp.getResult().getType();
       Value baseMemref = ptr;
-      Value index = rewriter.create<arith::IndexCastOp>(
-          loc, rewriter.getIndexType(), offset);
+      Value index = toIndex(loc, offset, rewriter);
       Value fallback = createZeroValue(loc, resultType, rewriter);
       Value result;
       if (!mask) {
@@ -649,8 +655,7 @@ struct AtomicRMWConverter : public OpConversionPattern<tts::AtomicRMWOp> {
       if (dim == resultType.getRank()) {
         Value offsetValue =
             b.create<tensor::ExtractOp>(nestedLoc, offset, indices);
-        Value index = b.create<arith::IndexCastOp>(nestedLoc, b.getIndexType(),
-                                                   offsetValue);
+        Value index = toIndex(nestedLoc, offsetValue, b);
         Value maskValue =
             mask ? b.create<tensor::ExtractOp>(nestedLoc, mask, indices)
                        .getResult()
@@ -725,8 +730,7 @@ struct AtomicCASConverter : public OpConversionPattern<tts::AtomicCASOp> {
     if (!offsetType) {
       auto resultType = atomicOp.getResult().getType();
       Value baseMemref = ptr;
-      Value index = rewriter.create<arith::IndexCastOp>(
-          loc, rewriter.getIndexType(), offset);
+      Value index = toIndex(loc, offset, rewriter);
       Value oldValue = createAtomicCASCall(loc, module, baseMemref, index, cmp,
                                            value, atomicOp.getSem(), rewriter);
       rewriter.replaceOp(atomicOp, oldValue);
@@ -769,8 +773,7 @@ struct AtomicCASConverter : public OpConversionPattern<tts::AtomicCASOp> {
       if (dim == resultType.getRank()) {
         Value offsetValue =
             b.create<tensor::ExtractOp>(nestedLoc, offset, indices);
-        Value index = b.create<arith::IndexCastOp>(nestedLoc, b.getIndexType(),
-                                                   offsetValue);
+        Value index = toIndex(nestedLoc, offsetValue, b);
         Value cmpValue = b.create<tensor::ExtractOp>(nestedLoc, cmp, indices);
         Value newValue = b.create<tensor::ExtractOp>(nestedLoc, value, indices);
         Value oldValue =

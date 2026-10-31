@@ -12,6 +12,25 @@ module {
     tt.return
   }
 }
+
+
+// -----
+
+
+module {
+  tt.func public @minnumf(%arg0: !tt.ptr<f32>) {
+    %cst_0 = arith.constant dense<0.000000e+00> : tensor<4096xf32>
+    %63 = "tt.reduce"(%cst_0) ({
+    ^bb0(%arg14: f32, %arg15: f32):
+      %69 = arith.minnumf %arg14, %arg15 : f32
+      tt.reduce.return %69 : f32
+    }) {axis = 0 : i32} : (tensor<4096xf32>) -> f32
+    tt.store %arg0, %63 : !tt.ptr<f32>
+    tt.return
+  }
+}
+
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK-LABEL:   func.func @maxnumf(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -36,23 +55,6 @@ module {
 // CHECK:           affine.store %[[EXTRACT_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xf32, strided<[1]>>
 // CHECK:           return
 // CHECK:         }
-
-
-// -----
-
-
-module {
-  tt.func public @minnumf(%arg0: !tt.ptr<f32>) {
-    %cst_0 = arith.constant dense<0.000000e+00> : tensor<4096xf32>
-    %63 = "tt.reduce"(%cst_0) ({
-    ^bb0(%arg14: f32, %arg15: f32):
-      %69 = arith.minnumf %arg14, %arg15 : f32
-      tt.reduce.return %69 : f32
-    }) {axis = 0 : i32} : (tensor<4096xf32>) -> f32
-    tt.store %arg0, %63 : !tt.ptr<f32>
-    tt.return
-  }
-}
 // CHECK-LABEL:   func.func @minnumf(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,

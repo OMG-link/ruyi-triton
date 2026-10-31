@@ -29,6 +29,7 @@ module {
   }
 }
 
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK-LABEL:   tt.func public @masked_gather_scatter(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>) attributes {noinline = false} {
@@ -38,14 +39,14 @@ module {
 // CHECK:           %[[CONSTANT_3:.*]] = arith.constant dense<3> : tensor<4xi32>
 // CHECK:           %[[CONSTANT_4:.*]] = arith.constant dense<64> : tensor<4xi32>
 // CHECK:           %[[CONSTANT_5:.*]] = arith.constant dense<4> : tensor<4xi32>
-// CHECK:           %[[CONSTANT_6:.*]] = arith.constant 2 : i32
-// CHECK:           %[[CONSTANT_7:.*]] = arith.constant 1 : i32
-// CHECK:           %[[CONSTANT_8:.*]] = arith.constant 0 : i32
+// CHECK:           %[[CONSTANT_6:.*]] = arith.constant 0 : i32
+// CHECK:           %[[CONSTANT_7:.*]] = arith.constant 2 : i32
+// CHECK:           %[[CONSTANT_8:.*]] = arith.constant 1 : i32
 // CHECK:           %[[CONSTANT_9:.*]] = arith.constant 9.900000e+01 : f32
 // CHECK:           %[[UNREALIZED_CONVERSION_CAST_0:.*]] = builtin.unrealized_conversion_cast %[[ARG1]] : !tt.ptr<f32> to memref<*xf32>
 // CHECK:           %[[UNREALIZED_CONVERSION_CAST_1:.*]] = builtin.unrealized_conversion_cast %[[ARG0]] : !tt.ptr<f32> to memref<*xf32>
 // CHECK:           %[[MAKE_RANGE_0:.*]] = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
-// CHECK:           %[[FOR_0:.*]]:2 = scf.for %[[VAL_0:.*]] = %[[CONSTANT_8]] to %[[CONSTANT_6]] step %[[CONSTANT_7]] iter_args(%[[VAL_1:.*]] = %[[MAKE_RANGE_0]], %[[VAL_2:.*]] = %[[MAKE_RANGE_0]]) -> (tensor<4xi32>, tensor<4xi32>)  : i32 {
+// CHECK:           %[[FOR_0:.*]]:2 = scf.for %[[VAL_0:.*]] = %[[CONSTANT_6]] to %[[CONSTANT_7]] step %[[CONSTANT_8]] iter_args(%[[VAL_1:.*]] = %[[MAKE_RANGE_0]], %[[VAL_2:.*]] = %[[MAKE_RANGE_0]]) -> (tensor<4xi32>, tensor<4xi32>)  : i32 {
 // CHECK:             %[[DIVSI_0:.*]] = arith.divsi %[[VAL_1]], %[[CONSTANT_3]] : tensor<4xi32>
 // CHECK:             %[[SPLAT_0:.*]] = tt.splat %[[VAL_0]] : i32 -> tensor<4xi32>
 // CHECK:             %[[ADDI_0:.*]] = arith.addi %[[DIVSI_0]], %[[SPLAT_0]] : tensor<4xi32>

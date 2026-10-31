@@ -516,7 +516,7 @@ void PtrAnalysis::visitOperandSplat(
 
   visitOperand(src, state, loc, rewriter, knownPtrs);
 
-  if (isa<IntegerType, triton::PointerType>(src.getType())) {
+  if (isa<IntegerType, IndexType, triton::PointerType>(src.getType())) {
     for (auto s : dstShape) {
       state.offsets.push_back(rewriter.getIndexAttr(0));
       state.sizes.push_back(rewriter.getIndexAttr(s));
@@ -634,6 +634,11 @@ void PtrAnalysis::visitOperand(
     return;
   }
 
+  if (isa<IndexType>(operand.getType())) {
+    state.scalar = operand;
+    return;
+  }
+
   if (isa<IntegerType>(operand.getType())) {
     auto castOp = rewriter.create<arith::IndexCastOp>(
         loc, rewriter.getIndexType(), operand);
@@ -694,7 +699,7 @@ void PtrAnalysis::visitOperandConstSplat(
   // folded
   auto attr = cast<DenseElementsAttr>(op.getValue());
   auto elementType = attr.getElementType();
-  assert(attr.isSplat() && isa<IntegerType>(elementType));
+  assert(attr.isSplat() && elementType.isIntOrIndex());
   auto values = attr.getValues<IntegerAttr>();
   auto value = values[0].getValue();
   auto constAttr = rewriter.getIndexAttr(value.getSExtValue());

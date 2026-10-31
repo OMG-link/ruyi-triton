@@ -8,9 +8,6 @@ module {
   }
 }
 
-// CHECK-LABEL:  func.func @minmax_olt
-// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<f32>, [[PARAM_1_:%.+]]: f32, [[PARAM_2_:%.+]]: f32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) attributes {llvm.bareptr} {
-// CHECK:       [[VAR_0_:%.+]] = arith.minimumf [[PARAM_1_]], [[PARAM_2_]] : f32
 
 // -----
 
@@ -23,9 +20,6 @@ module {
   }
 }
 
-// CHECK-LABEL:  func.func @minmax_ole
-// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<f32>, [[PARAM_1_:%.+]]: f32, [[PARAM_2_:%.+]]: f32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) attributes {llvm.bareptr} {
-// CHECK:       [[VAR_0_:%.+]] = arith.minimumf [[PARAM_1_]], [[PARAM_2_]] : f32
 
 // -----
 
@@ -38,9 +32,6 @@ module {
   }
 }
 
-// CHECK-LABEL:  func.func @minmax_ogt
-// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<f32>, [[PARAM_1_:%.+]]: f32, [[PARAM_2_:%.+]]: f32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) attributes {llvm.bareptr} {
-// CHECK:       [[VAR_0_:%.+]] = arith.maximumf [[PARAM_1_]], [[PARAM_2_]] : f32
 
 // -----
 
@@ -53,6 +44,64 @@ module {
   }
 }
 
-// CHECK-LABEL:  func.func @minmax_oge
-// CHECK-SAME:   ([[PARAM_0_:%.+]]: memref<f32>, [[PARAM_1_:%.+]]: f32, [[PARAM_2_:%.+]]: f32, [[PARAM_3_:%.+]]: i32, [[PARAM_4_:%.+]]: i32, [[PARAM_5_:%.+]]: i32, [[PARAM_6_:%.+]]: i32, [[PARAM_7_:%.+]]: i32, [[PARAM_8_:%.+]]: i32) attributes {llvm.bareptr} {
-// CHECK:       [[VAR_0_:%.+]] = arith.maximumf [[PARAM_1_]], [[PARAM_2_]] : f32
+// CHECK lines should be minimized and named to reflect the test’s intent.
+// CHECK-LABEL:   func.func @minmax_olt(
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[MINIMUMF_0:.*]] = arith.minimumf %[[ARG1]], %[[ARG2]] : f32
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1]>>
+// CHECK:           affine.store %[[MINIMUMF_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xf32, strided<[1]>>
+// CHECK:           return
+// CHECK:         }
+// CHECK-LABEL:   func.func @minmax_ole(
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[MINIMUMF_0:.*]] = arith.minimumf %[[ARG1]], %[[ARG2]] : f32
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1]>>
+// CHECK:           affine.store %[[MINIMUMF_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xf32, strided<[1]>>
+// CHECK:           return
+// CHECK:         }
+// CHECK-LABEL:   func.func @minmax_ogt(
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[MAXIMUMF_0:.*]] = arith.maximumf %[[ARG1]], %[[ARG2]] : f32
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1]>>
+// CHECK:           affine.store %[[MAXIMUMF_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xf32, strided<[1]>>
+// CHECK:           return
+// CHECK:         }
+// CHECK-LABEL:   func.func @minmax_oge(
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[MAXIMUMF_0:.*]] = arith.maximumf %[[ARG1]], %[[ARG2]] : f32
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1]>>
+// CHECK:           affine.store %[[MAXIMUMF_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xf32, strided<[1]>>
+// CHECK:           return
+// CHECK:         }

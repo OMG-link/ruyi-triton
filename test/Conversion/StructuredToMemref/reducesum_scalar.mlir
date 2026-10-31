@@ -16,24 +16,32 @@ module {
   }
 }
 
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK-LABEL:   func.func @kernel(
-// CHECK-SAME:  %[[VAL_0:.*]]: memref<bf16>, %[[VAL_1:.*]]: memref<bf16>, %[[VAL_2:.*]]: i32, %[[VAL_3:.*]]: i32, %[[VAL_4:.*]]: i32, %[[VAL_5:.*]]: i32, %[[VAL_6:.*]]: i32, %[[VAL_7:.*]]: i32) attributes {llvm.bareptr} {
-// CHECK:           %[[VAL_8:.*]] = arith.constant 0.000000e+00 : f32
-// CHECK:           %[[VAL_9:.*]] = memref.reinterpret_cast %[[VAL_0]] to offset: [0], sizes: [128], strides: [1] : memref<bf16> to memref<128xbf16, strided<[1]>>
-// CHECK:           %[[VAL_10:.*]] = memref.alloc() : memref<128xbf16>
-// CHECK:           memref.copy %[[VAL_9]], %[[VAL_10]] : memref<128xbf16, strided<[1]>> to memref<128xbf16>
-// CHECK:           %[[VAL_11:.*]] = bufferization.to_tensor %[[VAL_10]] restrict writable : memref<128xbf16> to tensor<128xbf16>
-// CHECK:           %[[VAL_12:.*]] = tensor.empty() : tensor<f32>
-// CHECK:           %[[VAL_13:.*]] = linalg.fill ins(%[[VAL_8]] : f32) outs(%[[VAL_12]] : tensor<f32>) -> tensor<f32>
-// CHECK:           %[[VAL_14:.*]] = linalg.reduce ins(%[[VAL_11]] : tensor<128xbf16>) outs(%[[VAL_13]] : tensor<f32>) dimensions = [0]
-// CHECK:             (%[[VAL_15:.*]]: bf16, %[[VAL_16:.*]]: f32) {
-// CHECK:               %[[VAL_17:.*]] = arith.extf %[[VAL_15]] : bf16 to f32
-// CHECK:               %[[VAL_18:.*]] = arith.addf %[[VAL_17]], %[[VAL_16]] : f32
-// CHECK:               linalg.yield %[[VAL_18]] : f32
+// CHECK-SAME:                      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<bf16>,
+// CHECK-SAME:                      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<bf16>,
+// CHECK-SAME:                      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:                      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:                      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:                      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:                      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:                      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 0.000000e+00 : f32
+// CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: [0], sizes: [128], strides: [1] : memref<bf16> to memref<128xbf16, strided<[1]>>
+// CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<128xbf16>
+// CHECK:           memref.copy %[[REINTERPRET_CAST_0]], %[[ALLOC_0]] : memref<128xbf16, strided<[1]>> to memref<128xbf16>
+// CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<128xbf16> to tensor<128xbf16>
+// CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<f32>
+// CHECK:           %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_0]] : f32) outs(%[[EMPTY_0]] : tensor<f32>) -> tensor<f32>
+// CHECK:           %[[REDUCE_0:.*]] = linalg.reduce ins(%[[TO_TENSOR_0]] : tensor<128xbf16>) outs(%[[FILL_0]] : tensor<f32>) dimensions = [0]
+// CHECK:             (%[[VAL_0:.*]]: bf16, %[[VAL_1:.*]]: f32) {
+// CHECK:               %[[EXTF_0:.*]] = arith.extf %[[VAL_0]] : bf16 to f32
+// CHECK:               %[[ADDF_0:.*]] = arith.addf %[[EXTF_0]], %[[VAL_1]] : f32
+// CHECK:               linalg.yield %[[ADDF_0]] : f32
 // CHECK:             }
-// CHECK:           %[[VAL_19:.*]] = tensor.extract %[[VAL_14]][] : tensor<f32>
-// CHECK:           %[[VAL_20:.*]] = arith.truncf %[[VAL_19]] : f32 to bf16
-// CHECK:           %[[VAL_21:.*]] = memref.reinterpret_cast %[[VAL_1]] to offset: [0], sizes: [1], strides: [1] : memref<bf16> to memref<1xbf16, strided<[1]>>
-// CHECK:           affine.store %[[VAL_20]], %[[VAL_21]][0] : memref<1xbf16, strided<[1]>>
+// CHECK:           %[[EXTRACT_0:.*]] = tensor.extract %[[REDUCE_0]][] : tensor<f32>
+// CHECK:           %[[TRUNCF_0:.*]] = arith.truncf %[[EXTRACT_0]] : f32 to bf16
+// CHECK:           %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: [0], sizes: [1], strides: [1] : memref<bf16> to memref<1xbf16, strided<[1]>>
+// CHECK:           affine.store %[[TRUNCF_0]], %[[REINTERPRET_CAST_1]][0] : memref<1xbf16, strided<[1]>>
 // CHECK:           return
 // CHECK:         }

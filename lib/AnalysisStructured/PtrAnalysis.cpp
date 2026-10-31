@@ -1084,7 +1084,7 @@ LogicalResult PtrAnalysis::visitOperandConstSplat(arith::ConstantOp op,
   // folded
   auto attr = cast<DenseElementsAttr>(op.getValue());
   auto elementType = attr.getElementType();
-  assert(attr.isSplat() && isa<IntegerType>(elementType));
+  assert(attr.isSplat() && elementType.isIntOrIndex());
   auto values = attr.getValues<IntegerAttr>();
   auto value = values[0].getValue();
   auto constAttr = builder.getIndexAttr(value.getSExtValue());

@@ -12,6 +12,61 @@ module {
     tt.return
   }
 }
+
+
+// -----
+
+module {
+  tt.func public @minmax_ugt(%arg0: !tt.ptr<i32>) {
+    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
+    %63 = "tt.reduce"(%cst_0) ({
+    ^bb0(%arg14: i32, %arg15: i32):
+      %69 = arith.cmpi ugt, %arg14, %arg15 : i32
+      %70 = arith.select %69, %arg14, %arg15 : i32
+      tt.reduce.return %70 : i32
+    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
+    tt.store %arg0, %63 : !tt.ptr<i32>
+    tt.return
+  }
+}
+
+
+
+// -----
+
+module {
+  tt.func public @minmax_slt(%arg0: !tt.ptr<i32>) {
+    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
+    %63 = "tt.reduce"(%cst_0) ({
+    ^bb0(%arg14: i32, %arg15: i32):
+      %69 = arith.cmpi slt, %arg14, %arg15 : i32
+      %70 = arith.select %69, %arg14, %arg15 : i32
+      tt.reduce.return %70 : i32
+    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
+    tt.store %arg0, %63 : !tt.ptr<i32>
+    tt.return
+  }
+}
+
+
+
+// -----
+
+module {
+  tt.func public @minmax_ult(%arg0: !tt.ptr<i32>) {
+    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
+    %63 = "tt.reduce"(%cst_0) ({
+    ^bb0(%arg14: i32, %arg15: i32):
+      %69 = arith.cmpi ult, %arg14, %arg15 : i32
+      %70 = arith.select %69, %arg14, %arg15 : i32
+      tt.reduce.return %70 : i32
+    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
+    tt.store %arg0, %63 : !tt.ptr<i32>
+    tt.return
+  }
+}
+
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK-LABEL:   func.func @minmax_sgt(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<i32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -36,25 +91,6 @@ module {
 // CHECK:           affine.store %[[EXTRACT_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xi32, strided<[1]>>
 // CHECK:           return
 // CHECK:         }
-
-
-// -----
-
-module {
-  tt.func public @minmax_ugt(%arg0: !tt.ptr<i32>) {
-    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
-    %63 = "tt.reduce"(%cst_0) ({
-    ^bb0(%arg14: i32, %arg15: i32):
-      %69 = arith.cmpi ugt, %arg14, %arg15 : i32
-      %70 = arith.select %69, %arg14, %arg15 : i32
-      tt.reduce.return %70 : i32
-    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
-    tt.store %arg0, %63 : !tt.ptr<i32>
-    tt.return
-  }
-}
-
-
 // CHECK-LABEL:   func.func @minmax_ugt(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<i32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -78,23 +114,6 @@ module {
 // CHECK:           affine.store %[[EXTRACT_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xi32, strided<[1]>>
 // CHECK:           return
 // CHECK:         }
-
-// -----
-
-module {
-  tt.func public @minmax_slt(%arg0: !tt.ptr<i32>) {
-    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
-    %63 = "tt.reduce"(%cst_0) ({
-    ^bb0(%arg14: i32, %arg15: i32):
-      %69 = arith.cmpi slt, %arg14, %arg15 : i32
-      %70 = arith.select %69, %arg14, %arg15 : i32
-      tt.reduce.return %70 : i32
-    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
-    tt.store %arg0, %63 : !tt.ptr<i32>
-    tt.return
-  }
-}
-
 // CHECK-LABEL:   func.func @minmax_slt(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<i32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -119,24 +138,6 @@ module {
 // CHECK:           affine.store %[[EXTRACT_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xi32, strided<[1]>>
 // CHECK:           return
 // CHECK:         }
-
-
-// -----
-
-module {
-  tt.func public @minmax_ult(%arg0: !tt.ptr<i32>) {
-    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
-    %63 = "tt.reduce"(%cst_0) ({
-    ^bb0(%arg14: i32, %arg15: i32):
-      %69 = arith.cmpi ult, %arg14, %arg15 : i32
-      %70 = arith.select %69, %arg14, %arg15 : i32
-      tt.reduce.return %70 : i32
-    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
-    tt.store %arg0, %63 : !tt.ptr<i32>
-    tt.return
-  }
-}
-
 // CHECK-LABEL:   func.func @minmax_ult(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<i32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,

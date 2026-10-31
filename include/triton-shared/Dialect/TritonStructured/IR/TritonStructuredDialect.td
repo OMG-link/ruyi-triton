@@ -123,8 +123,6 @@ def TTS_MakeTensorPtrOp
   //let hasCanonicalizer = 1;
 }
 
-def TT_IndexTensorLike : AnyTypeOf<[I32Tensor, I64Tensor]>;
-
 def TTS_MakeGatherScatterTensorPtrOp
   : TTS_Op<"make_gather_scatter_tptr", [AttrSizedOperandSegments, Pure]> {
   // NOTE: Only support cases where the offset for each dimension is defined in a different operation.
@@ -166,7 +164,7 @@ def TTS_MakeGatherScatterTensorPtrOp
   // result:  A tensor of pointers.
 
   let arguments = (ins TT_Ptr:$base,
-                       TT_IndexTensorLike:$gather_scatter_offset,
+                       TT_IntOrIndexLike:$gather_scatter_offset,
                        I32Attr:$gather_scatter_dim,
                        DenseI64ArrayAttr:$sizes,
                        Variadic<Index>:$strides,
@@ -266,7 +264,7 @@ def TTS_GatherOp : TTS_Op<"gather", [
   let arguments = (
     ins
     TT_Ptr:$ptr,
-    TT_IntLike:$offset,
+    TT_IntOrIndexLike:$offset,
     Optional<TT_BoolLike>:$mask,
     Optional<TT_Type>:$other
   );
@@ -289,7 +287,7 @@ def TTS_ScatterOp : TTS_Op<"scatter", [
   let arguments = (
     ins
     TT_Ptr:$ptr,
-    TT_IntLike:$offset,
+    TT_IntOrIndexLike:$offset,
     TT_Type:$value,
     Optional<TT_BoolLike>:$mask
   );
@@ -311,7 +309,7 @@ def TTS_AtomicRMWOp : TTS_Op<"atomic_rmw", [
     ins
     TT_AtomicRMWAttr:$atomic_rmw_op,
     TT_Ptr:$ptr,
-    TT_IntLike:$offset,
+    TT_IntOrIndexLike:$offset,
     TT_Type:$val,
     Optional<TT_BoolLike>:$mask,
     TT_MemSemanticAttr:$sem,
@@ -335,7 +333,7 @@ def TTS_AtomicCASOp : TTS_Op<"atomic_cas", [
   let arguments = (
     ins
     TT_Ptr:$ptr,
-    TT_IntLike:$offset,
+    TT_IntOrIndexLike:$offset,
     TT_Type:$cmp,
     TT_Type:$val,
     TT_MemSemanticAttr:$sem,

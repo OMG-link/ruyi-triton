@@ -3,13 +3,26 @@
 // This script is intended to make adding checks to a test case quick and easy.
 // It is *not* authoritative about what constitutes a good test. After using the
 // script, be sure to review and refine the generated checks. For example,
-// CHECK lines should be minimized and named to reflect the test’s intent.
 // For comprehensive guidelines, see:
 //   * https://mlir.llvm.org/getting_started/TestingGuide/
 
 
 // RUN: triton-shared-opt --split-input-file --triton-to-linalg-experimental  %s | FileCheck %s
 
+module {
+  tt.func public @addi(%arg0: !tt.ptr<i32>) {
+    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
+    %63 = "tt.reduce"(%cst_0) ({
+    ^bb0(%arg14: i32, %arg15: i32):
+      %69 = arith.addi %arg14, %arg15 : i32
+      tt.reduce.return %69 : i32
+    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
+    tt.store %arg0, %63 : !tt.ptr<i32>
+    tt.return
+  }
+}
+
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK-LABEL:   func.func @addi(
 // CHECK-SAME:                    %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<i32>,
 // CHECK-SAME:                    %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
@@ -33,15 +46,3 @@
 // CHECK:           affine.store %[[EXTRACT_0]], %[[REINTERPRET_CAST_0]][0] : memref<1xi32, strided<[1]>>
 // CHECK:           return
 // CHECK:         }
-module {
-  tt.func public @addi(%arg0: !tt.ptr<i32>) {
-    %cst_0 = arith.constant dense<0> : tensor<4096xi32>
-    %63 = "tt.reduce"(%cst_0) ({
-    ^bb0(%arg14: i32, %arg15: i32):
-      %69 = arith.addi %arg14, %arg15 : i32
-      tt.reduce.return %69 : i32
-    }) {axis = 0 : i32} : (tensor<4096xi32>) -> i32
-    tt.store %arg0, %63 : !tt.ptr<i32>
-    tt.return
-  }
-}

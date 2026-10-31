@@ -3,13 +3,51 @@
 // This script is intended to make adding checks to a test case quick and easy.
 // It is *not* authoritative about what constitutes a good test. After using the
 // script, be sure to review and refine the generated checks. For example,
-// CHECK lines should be minimized and named to reflect the test’s intent.
 // For comprehensive guidelines, see:
 //   * https://mlir.llvm.org/getting_started/TestingGuide/
 
 
 // RUN: triton-shared-opt --split-input-file --triton-to-linalg-experimental %s | FileCheck %s
 
+module {
+  tt.func public @softmax_kernel_012345(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32, %arg3: i32, %arg4: i32) {
+    %cst = arith.constant 0xFF800000 : f32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.muli %0, %arg2 : i32
+    %2 = tt.addptr %arg1, %1 : !tt.ptr<f32>, i32
+    %3 = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
+    %4 = tt.splat %2 : !tt.ptr<f32> -> tensor<128x!tt.ptr<f32>>
+    %5 = tt.addptr %4, %3 : tensor<128x!tt.ptr<f32>>, tensor<128xi32>
+    %6 = tt.splat %arg4 : i32 -> tensor<128xi32>
+    %7 = arith.cmpi slt, %3, %6 : tensor<128xi32>
+    %8 = tt.splat %cst : f32 -> tensor<128xf32>
+    %9 = tt.load %5, %7, %8 : tensor<128x!tt.ptr<f32>>
+    %10 = "tt.reduce"(%9) ({
+    ^bb0(%arg5: f32, %arg6: f32):
+      %21 = arith.cmpf ogt, %arg5, %arg6 : f32
+      %22 = arith.select %21, %arg5, %arg6 : f32
+      tt.reduce.return %22 : f32
+    }) {axis = 0 : i32} : (tensor<128xf32>) -> f32
+    %11 = tt.splat %10 : f32 -> tensor<128xf32>
+    %12 = arith.subf %9, %11 : tensor<128xf32>
+    %13 = math.exp %12 : tensor<128xf32>
+    %14 = "tt.reduce"(%13) ({
+    ^bb0(%arg5: f32, %arg6: f32):
+      %21 = arith.addf %arg5, %arg6 : f32
+      tt.reduce.return %21 : f32
+    }) {axis = 0 : i32} : (tensor<128xf32>) -> f32
+    %15 = tt.splat %14 : f32 -> tensor<128xf32>
+    %16 = arith.divf %13, %15 : tensor<128xf32>
+    %17 = arith.muli %0, %arg3 : i32
+    %18 = tt.addptr %arg0, %17 : !tt.ptr<f32>, i32
+    %19 = tt.splat %18 : !tt.ptr<f32> -> tensor<128x!tt.ptr<f32>>
+    %20 = tt.addptr %19, %3 : tensor<128x!tt.ptr<f32>>, tensor<128xi32>
+    tt.store %20, %16, %7 : tensor<128x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
 // CHECK-LABEL:   func.func @softmax_kernel_012345(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
@@ -24,26 +62,26 @@
 // CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
 // CHECK-SAME:      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
 // CHECK:           %[[CONSTANT_0:.*]] = arith.constant 128 : index
-// CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0 : index
-// CHECK:           %[[CONSTANT_2:.*]] = arith.constant 0xFF800000 : f32
+// CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0xFF800000 : f32
+// CHECK:           %[[CONSTANT_2:.*]] = arith.constant 0 : index
 // CHECK:           %[[CONSTANT_3:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG8]], %[[ARG2]] : i32
 // CHECK:           %[[INDEX_CAST_0:.*]] = arith.index_cast %[[MULI_0]] : i32 to index
 // CHECK:           %[[INDEX_CAST_1:.*]] = arith.index_cast %[[ARG4]] : i32 to index
 // CHECK:           %[[MINSI_0:.*]] = arith.minsi %[[INDEX_CAST_1]], %[[CONSTANT_0]] : index
-// CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[CONSTANT_1]] : index
+// CHECK:           %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[CONSTANT_2]] : index
 // CHECK:           %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[INDEX_CAST_0]]], sizes: [128], strides: [1] : memref<f32> to memref<128xf32, strided<[1], offset: ?>>
 // CHECK:           %[[ALLOC_0:.*]] = memref.alloc() : memref<128xf32>
 // CHECK:           %[[CMPI_0:.*]] = arith.cmpi slt, %[[MAXSI_0]], %[[CONSTANT_0]] : index
 // CHECK:           scf.if %[[CMPI_0]] {
-// CHECK:             linalg.fill ins(%[[CONSTANT_2]] : f32) outs(%[[ALLOC_0]] : memref<128xf32>)
+// CHECK:             linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[ALLOC_0]] : memref<128xf32>)
 // CHECK:           }
 // CHECK:           %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[MAXSI_0]]] [1] : memref<128xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
 // CHECK:           %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[MAXSI_0]]] [1] : memref<128xf32> to memref<?xf32, strided<[1]>>
 // CHECK:           memref.copy %[[SUBVIEW_0]], %[[SUBVIEW_1]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
 // CHECK:           %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<128xf32> to tensor<128xf32>
 // CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<f32>
-// CHECK:           %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_2]] : f32) outs(%[[EMPTY_0]] : tensor<f32>) -> tensor<f32>
+// CHECK:           %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[EMPTY_0]] : tensor<f32>) -> tensor<f32>
 // CHECK:           %[[REDUCE_0:.*]] = linalg.reduce ins(%[[TO_TENSOR_0]] : tensor<128xf32>) outs(%[[FILL_0]] : tensor<f32>) dimensions = [0]
 // CHECK:             (%[[VAL_0:.*]]: f32, %[[VAL_1:.*]]: f32) {
 // CHECK:               %[[MAXIMUMF_0:.*]] = arith.maximumf %[[VAL_0]], %[[VAL_1]] : f32
@@ -83,40 +121,3 @@
 // CHECK:           bufferization.materialize_in_destination %[[EXTRACT_SLICE_0]] in writable %[[SUBVIEW_2]] : (tensor<?xf32>, memref<?xf32, strided<[1], offset: ?>>) -> ()
 // CHECK:           return
 // CHECK:         }
-module {
-  tt.func public @softmax_kernel_012345(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: i32, %arg3: i32, %arg4: i32) {
-    %cst = arith.constant 0xFF800000 : f32
-    %0 = tt.get_program_id x : i32
-    %1 = arith.muli %0, %arg2 : i32
-    %2 = tt.addptr %arg1, %1 : !tt.ptr<f32>, i32
-    %3 = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
-    %4 = tt.splat %2 : !tt.ptr<f32> -> tensor<128x!tt.ptr<f32>>
-    %5 = tt.addptr %4, %3 : tensor<128x!tt.ptr<f32>>, tensor<128xi32>
-    %6 = tt.splat %arg4 : i32 -> tensor<128xi32>
-    %7 = arith.cmpi slt, %3, %6 : tensor<128xi32>
-    %8 = tt.splat %cst : f32 -> tensor<128xf32>
-    %9 = tt.load %5, %7, %8 : tensor<128x!tt.ptr<f32>>
-    %10 = "tt.reduce"(%9) ({
-    ^bb0(%arg5: f32, %arg6: f32):
-      %21 = arith.cmpf ogt, %arg5, %arg6 : f32
-      %22 = arith.select %21, %arg5, %arg6 : f32
-      tt.reduce.return %22 : f32
-    }) {axis = 0 : i32} : (tensor<128xf32>) -> f32
-    %11 = tt.splat %10 : f32 -> tensor<128xf32>
-    %12 = arith.subf %9, %11 : tensor<128xf32>
-    %13 = math.exp %12 : tensor<128xf32>
-    %14 = "tt.reduce"(%13) ({
-    ^bb0(%arg5: f32, %arg6: f32):
-      %21 = arith.addf %arg5, %arg6 : f32
-      tt.reduce.return %21 : f32
-    }) {axis = 0 : i32} : (tensor<128xf32>) -> f32
-    %15 = tt.splat %14 : f32 -> tensor<128xf32>
-    %16 = arith.divf %13, %15 : tensor<128xf32>
-    %17 = arith.muli %0, %arg3 : i32
-    %18 = tt.addptr %arg0, %17 : !tt.ptr<f32>, i32
-    %19 = tt.splat %18 : !tt.ptr<f32> -> tensor<128x!tt.ptr<f32>>
-    %20 = tt.addptr %19, %3 : tensor<128x!tt.ptr<f32>>, tensor<128xi32>
-    tt.store %20, %16, %7 : tensor<128x!tt.ptr<f32>>
-    tt.return
-  }
-}

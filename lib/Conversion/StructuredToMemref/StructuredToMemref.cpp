@@ -2348,9 +2348,9 @@ private:
     unsigned offsetSize = offsetShapedType.getShape()[0];
     auto indexOffsetTy = RankedTensorType::get(offsetShapedType.getShape(),
                                                rewriter.getIndexType());
-    gatherOffset =
-        rewriter.create<arith::IndexCastOp>(loc, indexOffsetTy, gatherOffset)
-            .getResult();
+    if (gatherOffset.getType() != indexOffsetTy)
+      gatherOffset = rewriter.create<arith::IndexCastOp>(
+          loc, indexOffsetTy, gatherOffset);
 
     int gatherDim = ptr.getGatherScatterDim();
 
@@ -2767,9 +2767,9 @@ private:
     unsigned offsetSize = offsetShapedType.getShape()[0];
     auto indexOffsetTy = RankedTensorType::get(offsetShapedType.getShape(),
                                                rewriter.getIndexType());
-    gatherOffset =
-        rewriter.create<arith::IndexCastOp>(loc, indexOffsetTy, gatherOffset)
-            .getResult();
+    if (gatherOffset.getType() != indexOffsetTy)
+      gatherOffset = rewriter.create<arith::IndexCastOp>(
+          loc, indexOffsetTy, gatherOffset);
 
     int gatherDim = ptr.getGatherScatterDim();
 

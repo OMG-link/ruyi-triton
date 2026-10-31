@@ -11,9 +11,10 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @byte_sized_tensor_bitcast(
-// CHECK-SAME:    %[[BASE:.*]]: !tt.ptr<i1>, %[[OFFSETS:.*]]: tensor<4xi32>)
+// CHECK-SAME:    %[[BASE:[a-zA-Z0-9_]+]]: !tt.ptr<i1>, %[[OFFSETS:.*]]: tensor<4xi32>)
+// CHECK:         %[[INDEX:.*]] = arith.index_cast %[[OFFSETS]] : tensor<4xi32> to tensor<4xindex>
 // CHECK:         %[[CAST:.*]] = tt.bitcast %[[BASE]] : !tt.ptr<i1> -> !tt.ptr<i8>
-// CHECK:         %[[VALUE:.*]] = tts.gather %[[CAST]][%[[OFFSETS]]] : (<i8>, tensor<4xi32>) -> tensor<4xi8>
+// CHECK:         %[[VALUE:.*]] = tts.gather %[[CAST]][%[[INDEX]]] : (<i8>, tensor<4xindex>) -> tensor<4xi8>
 // CHECK:         tt.return %[[VALUE]] : tensor<4xi8>
 
 // -----
@@ -63,10 +64,10 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @for_direct_base(
-// CHECK-SAME:    %[[BASE:.*]]: !tt.ptr<i32>)
-// CHECK:         %[[ZERO:.*]] = arith.constant 0 : i32
+// CHECK-SAME:    %[[BASE:[a-zA-Z0-9_]+]]: !tt.ptr<i32>)
+// CHECK:         %[[ZERO:.*]] = arith.constant 0 : index
 // CHECK-NOT:     scf.for
-// CHECK:         %[[VALUE:.*]] = tts.gather %[[BASE]][%[[ZERO]]] : (<i32>, i32) -> i32
+// CHECK:         %[[VALUE:.*]] = tts.gather %[[BASE]][%[[ZERO]]] : (<i32>, index) -> i32
 // CHECK:         tt.return %[[VALUE]] : i32
 
 // -----
@@ -87,10 +88,12 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @for_widens_offset(
-// CHECK:         %[[RESULT:.*]] = scf.for {{.*}} iter_args(%[[PTR:.*]] = %arg0) -> (!tt.ptr<i32>)
-// CHECK:           %[[NEXT:.*]] = tt.addptr %[[PTR]], {{.*}} : !tt.ptr<i32>, i64
-// CHECK:           scf.yield %[[NEXT]] : !tt.ptr<i32>
-// CHECK:         %[[VALUE:.*]] = tt.load %[[RESULT]] : !tt.ptr<i32>
+// CHECK:         %[[ZERO:.*]] = arith.constant 0 : index
+// CHECK:         %[[ONE:.*]] = arith.constant 1 : index
+// CHECK:         %[[RESULT:.*]] = scf.for {{.*}} iter_args(%[[PTR:.*]] = %[[ZERO]]) -> (index)
+// CHECK:           %[[NEXT:.*]] = arith.addi %[[PTR]], %[[ONE]] : index
+// CHECK:           scf.yield %[[NEXT]] : index
+// CHECK:         %[[VALUE:.*]] = tts.gather %arg0[%[[RESULT]]] : (<i32>, index) -> i32
 // CHECK:         tt.return %[[VALUE]] : i32
 
 // -----
@@ -111,12 +114,12 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @while_keeps_pointer_base(
-// CHECK-SAME:    %[[BASE:.*]]: !tt.ptr<i32>)
-// CHECK:         %[[ZERO:.*]] = arith.constant 0 : i32
+// CHECK-SAME:    %[[BASE:[a-zA-Z0-9_]+]]: !tt.ptr<i32>)
+// CHECK:         %[[ZERO:.*]] = arith.constant 0 : index
 // CHECK:         %[[RESULT:.*]] = scf.while (%{{.*}} = %{{.*}}) : (i1) -> i1
 // CHECK:           scf.condition(%{{.*}}) %{{.*}} : i1
 // CHECK:           scf.yield %{{.*}} : i1
-// CHECK:         %[[VALUE:.*]] = tts.gather %[[BASE]][%[[ZERO]]] : (<i32>, i32) -> i32
+// CHECK:         %[[VALUE:.*]] = tts.gather %[[BASE]][%[[ZERO]]] : (<i32>, index) -> i32
 // CHECK:         tt.return %[[VALUE]], %[[RESULT]] : i32, i1
 
 // -----
@@ -131,12 +134,13 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @wide_base_offset(
-// CHECK-SAME:    %[[BASE:.*]]: !tt.ptr<f32>, %[[BASE_OFFSET:.*]]: i64, %[[INPUT_OFFSETS:.*]]: tensor<4xi32>)
 // CHECK-NOT:     arith.trunci
-// CHECK:         %[[WIDE_OFFSETS:.*]] = arith.extsi %[[INPUT_OFFSETS]] : tensor<4xi32> to tensor<4xi64>
-// CHECK:         %[[BASE_SPLAT:.*]] = tt.splat %[[BASE_OFFSET]] : i64 -> tensor<4xi64>
-// CHECK:         %[[OFFSETS:.*]] = arith.addi %[[BASE_SPLAT]], %[[WIDE_OFFSETS]] : tensor<4xi64>
-// CHECK:         tts.make_gather_scatter_tptr %[[BASE]] {{.*}} gather_scatter_offset: %[[OFFSETS]]{{.*}} : tensor<4xi64> <f32> to tensor<4x!tt.ptr<f32>>
+// CHECK:         %[[BASE_OFFSET:.*]] = arith.index_cast %arg1 : i64 to index
+// CHECK:         %[[OFFSETS:.*]] = arith.index_cast %arg2 : tensor<4xi32> to tensor<4xindex>
+// CHECK:         %[[BASE_SPLAT:.*]] = tt.splat %[[BASE_OFFSET]] : index -> tensor<4xindex>
+// CHECK:         %[[ACCUMULATED:.*]] = arith.addi %[[BASE_SPLAT]], %[[OFFSETS]] : tensor<4xindex>
+// CHECK-NOT:     tt.addptr
+// CHECK:         tts.make_gather_scatter_tptr %arg0 {{.*}} gather_scatter_offset: %[[ACCUMULATED]]{{.*}} : tensor<4xindex> <f32> to tensor<4x!tt.ptr<f32>>
 
 // -----
 
@@ -151,12 +155,13 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @scalar_bitcast_multiple_users(
-// CHECK-SAME:    %[[BASE:.*]]: !tt.ptr<i32>, %[[OFFSET:.*]]: i32)
-// CHECK:         %[[ZERO:.*]] = arith.constant 0 : i32
-// CHECK:         %[[FIRST:.*]] = tts.gather %[[BASE]][%[[OFFSET]]] : (<i32>, i32) -> i32
-// CHECK:         %[[ADDRESS:.*]] = tt.addptr %[[BASE]], %[[OFFSET]] : !tt.ptr<i32>, i32
+// CHECK-SAME:    %[[BASE:[a-zA-Z0-9_]+]]: !tt.ptr<i32>, %[[OFFSET:.*]]: i32)
+// CHECK:         %[[ZERO:.*]] = arith.constant 0 : index
+// CHECK:         %[[INDEX:.*]] = arith.index_cast %[[OFFSET]] : i32 to index
+// CHECK:         %[[FIRST:.*]] = tts.gather %[[BASE]][%[[INDEX]]] : (<i32>, index) -> i32
+// CHECK:         %[[ADDRESS:.*]] = tt.addptr %[[BASE]], %[[INDEX]] : !tt.ptr<i32>, index
 // CHECK:         %[[WIDE:.*]] = tt.bitcast %[[ADDRESS]] : !tt.ptr<i32> -> !tt.ptr<i64>
-// CHECK:         %[[SECOND:.*]] = tts.gather %[[WIDE]][%[[ZERO]]] : (<i64>, i32) -> i64
+// CHECK:         %[[SECOND:.*]] = tts.gather %[[WIDE]][%[[ZERO]]] : (<i64>, index) -> i64
 // CHECK:         tt.return %[[FIRST]], %[[SECOND]] : i32, i64
 
 // -----
@@ -171,8 +176,9 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @same_width_bitcast_ptr_to_int(
-// CHECK-SAME:    %[[BASE:.*]]: !tt.ptr<i32>, %[[OFFSET:.*]]: i32)
+// CHECK-SAME:    %[[BASE:[a-zA-Z0-9_]+]]: !tt.ptr<i32>, %[[OFFSET:.*]]: i32)
+// CHECK:         %[[INDEX:.*]] = arith.index_cast %[[OFFSET]] : i32 to index
 // CHECK:         %[[CAST_BASE:.*]] = tt.bitcast %[[BASE]] : !tt.ptr<i32> -> !tt.ptr<f32>
-// CHECK:         %[[ADDRESS:.*]] = tt.addptr %[[CAST_BASE]], %[[OFFSET]] : !tt.ptr<f32>, i32
+// CHECK:         %[[ADDRESS:.*]] = tt.addptr %[[CAST_BASE]], %[[INDEX]] : !tt.ptr<f32>, index
 // CHECK:         %[[RESULT:.*]] = tt.ptr_to_int %[[ADDRESS]] : !tt.ptr<f32> -> i64
 // CHECK:         tt.return %[[RESULT]] : i64

@@ -3,208 +3,12 @@
 // This script is intended to make adding checks to a test case quick and easy.
 // It is *not* authoritative about what constitutes a good test. After using the
 // script, be sure to review and refine the generated checks. For example,
-// CHECK lines should be minimized and named to reflect the test’s intent.
 // For comprehensive guidelines, see:
 //   * https://mlir.llvm.org/getting_started/TestingGuide/
 
 
 // RUN: triton-shared-opt --split-input-file --triton-to-linalg-experimental %s | FileCheck %s
 
-// CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
-// CHECK-LABEL:   func.func @_layer_norm_fwd_fused_0123456789(
-// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
-// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
-// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
-// CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
-// CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
-// CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
-// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
-// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG11:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG12:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG13:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
-// CHECK-SAME:      %[[ARG14:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
-// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 256 : index
-// CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0.000000e+00 : f32
-// CHECK:           %[[CONSTANT_2:.*]] = arith.constant 0 : i32
-// CHECK:           %[[CONSTANT_3:.*]] = arith.constant 256 : i32
-// CHECK:           %[[CONSTANT_4:.*]] = arith.constant 1.000000e+00 : f32
-// CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<256xf32>
-// CHECK:           %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[EMPTY_0]] : tensor<256xf32>) -> tensor<256xf32>
-// CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG12]], %[[ARG6]] : i32
-// CHECK:           %[[INDEX_CAST_0:.*]] = arith.index_cast %[[MULI_0]] : i32 to index
-// CHECK:           %[[EMPTY_1:.*]] = tensor.empty() : tensor<256xi32>
-// CHECK:           %[[GENERIC_0:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]]], iterator_types = ["parallel"]} outs(%[[EMPTY_1]] : tensor<256xi32>) {
-// CHECK:           ^bb0(%[[VAL_0:.*]]: i32):
-// CHECK:             %[[INDEX_0:.*]] = linalg.index 0 : index
-// CHECK:             %[[INDEX_CAST_1:.*]] = arith.index_cast %[[INDEX_0]] : index to i32
-// CHECK:             linalg.yield %[[INDEX_CAST_1]] : i32
-// CHECK:           } -> tensor<256xi32>
-// CHECK:           %[[FILL_1:.*]] = linalg.fill ins(%[[ARG7]] : i32) outs(%[[EMPTY_1]] : tensor<256xi32>) -> tensor<256xi32>
-// CHECK:           %[[FOR_0:.*]] = scf.for %[[VAL_1:.*]] = %[[CONSTANT_2]] to %[[ARG7]] step %[[CONSTANT_3]] iter_args(%[[VAL_2:.*]] = %[[FILL_0]]) -> (tensor<256xf32>)  : i32 {
-// CHECK:             %[[INDEX_CAST_2:.*]] = arith.index_cast %[[VAL_1]] : i32 to index
-// CHECK:             %[[ADDI_0:.*]] = arith.addi %[[INDEX_CAST_0]], %[[INDEX_CAST_2]] : index
-// CHECK:             %[[ADDI_1:.*]] = arith.addi %[[INDEX_CAST_2]], %[[CONSTANT_0]] : index
-// CHECK:             %[[INDEX_CAST_3:.*]] = arith.index_cast %[[ARG7]] : i32 to index
-// CHECK:             %[[MINSI_0:.*]] = arith.minsi %[[ADDI_1]], %[[INDEX_CAST_3]] : index
-// CHECK:             %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_2]] : index
-// CHECK:             %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_2]] : index
-// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_0]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
-// CHECK:             %[[ALLOC_0:.*]] = memref.alloc() : memref<256xf32>
-// CHECK:             %[[CMPI_0:.*]] = arith.cmpi slt, %[[SUBI_0]], %[[CONSTANT_0]] : index
-// CHECK:             scf.if %[[CMPI_0]] {
-// CHECK:               linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[ALLOC_0]] : memref<256xf32>)
-// CHECK:             }
-// CHECK:             %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-// CHECK:             %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
-// CHECK:             memref.copy %[[SUBVIEW_0]], %[[SUBVIEW_1]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
-// CHECK:             %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<256xf32> to tensor<256xf32>
-// CHECK:             %[[GENERIC_1:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[VAL_2]], %[[TO_TENSOR_0]] : tensor<256xf32>, tensor<256xf32>) outs(%[[VAL_2]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_3:.*]]: f32, %[[VAL_4:.*]]: f32, %[[VAL_5:.*]]: f32):
-// CHECK:               %[[ADDF_0:.*]] = arith.addf %[[VAL_3]], %[[VAL_4]] : f32
-// CHECK:               linalg.yield %[[ADDF_0]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             scf.yield %[[GENERIC_1]] : tensor<256xf32>
-// CHECK:           }
-// CHECK:           %[[EMPTY_2:.*]] = tensor.empty() : tensor<f32>
-// CHECK:           %[[FILL_2:.*]] = linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[EMPTY_2]] : tensor<f32>) -> tensor<f32>
-// CHECK:           %[[REDUCE_0:.*]] = linalg.reduce ins(%[[FOR_0]] : tensor<256xf32>) outs(%[[FILL_2]] : tensor<f32>) dimensions = [0]
-// CHECK:             (%[[VAL_6:.*]]: f32, %[[VAL_7:.*]]: f32) {
-// CHECK:               %[[ADDF_1:.*]] = arith.addf %[[VAL_6]], %[[VAL_7]] : f32
-// CHECK:               linalg.yield %[[ADDF_1]] : f32
-// CHECK:             }
-// CHECK:           %[[EXTRACT_0:.*]] = tensor.extract %[[REDUCE_0]][] : tensor<f32>
-// CHECK:           %[[SITOFP_0:.*]] = arith.sitofp %[[ARG7]] : i32 to f32
-// CHECK:           %[[DIVF_0:.*]] = arith.divf %[[EXTRACT_0]], %[[SITOFP_0]] : f32
-// CHECK:           %[[FILL_3:.*]] = linalg.fill ins(%[[DIVF_0]] : f32) outs(%[[EMPTY_0]] : tensor<256xf32>) -> tensor<256xf32>
-// CHECK:           %[[FOR_1:.*]] = scf.for %[[VAL_8:.*]] = %[[CONSTANT_2]] to %[[ARG7]] step %[[CONSTANT_3]] iter_args(%[[VAL_9:.*]] = %[[FILL_0]]) -> (tensor<256xf32>)  : i32 {
-// CHECK:             %[[FILL_4:.*]] = linalg.fill ins(%[[VAL_8]] : i32) outs(%[[EMPTY_1]] : tensor<256xi32>) -> tensor<256xi32>
-// CHECK:             %[[GENERIC_2:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[FILL_4]], %[[GENERIC_0]] : tensor<256xi32>, tensor<256xi32>) outs(%[[FILL_4]] : tensor<256xi32>) {
-// CHECK:             ^bb0(%[[VAL_10:.*]]: i32, %[[VAL_11:.*]]: i32, %[[VAL_12:.*]]: i32):
-// CHECK:               %[[ADDI_2:.*]] = arith.addi %[[VAL_10]], %[[VAL_11]] : i32
-// CHECK:               linalg.yield %[[ADDI_2]] : i32
-// CHECK:             } -> tensor<256xi32>
-// CHECK:             %[[EMPTY_3:.*]] = tensor.empty() : tensor<256xi1>
-// CHECK:             %[[GENERIC_3:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_2]], %[[FILL_1]] : tensor<256xi32>, tensor<256xi32>) outs(%[[EMPTY_3]] : tensor<256xi1>) {
-// CHECK:             ^bb0(%[[VAL_13:.*]]: i32, %[[VAL_14:.*]]: i32, %[[VAL_15:.*]]: i1):
-// CHECK:               %[[CMPI_1:.*]] = arith.cmpi slt, %[[VAL_13]], %[[VAL_14]] : i32
-// CHECK:               linalg.yield %[[CMPI_1]] : i1
-// CHECK:             } -> tensor<256xi1>
-// CHECK:             %[[INDEX_CAST_4:.*]] = arith.index_cast %[[VAL_8]] : i32 to index
-// CHECK:             %[[ADDI_3:.*]] = arith.addi %[[INDEX_CAST_0]], %[[INDEX_CAST_4]] : index
-// CHECK:             %[[ADDI_4:.*]] = arith.addi %[[INDEX_CAST_4]], %[[CONSTANT_0]] : index
-// CHECK:             %[[INDEX_CAST_5:.*]] = arith.index_cast %[[ARG7]] : i32 to index
-// CHECK:             %[[MINSI_1:.*]] = arith.minsi %[[ADDI_4]], %[[INDEX_CAST_5]] : index
-// CHECK:             %[[MAXSI_1:.*]] = arith.maxsi %[[MINSI_1]], %[[INDEX_CAST_4]] : index
-// CHECK:             %[[SUBI_1:.*]] = arith.subi %[[MAXSI_1]], %[[INDEX_CAST_4]] : index
-// CHECK:             %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_3]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
-// CHECK:             %[[ALLOC_1:.*]] = memref.alloc() : memref<256xf32>
-// CHECK:             %[[CMPI_2:.*]] = arith.cmpi slt, %[[SUBI_1]], %[[CONSTANT_0]] : index
-// CHECK:             scf.if %[[CMPI_2]] {
-// CHECK:               linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[ALLOC_1]] : memref<256xf32>)
-// CHECK:             }
-// CHECK:             %[[SUBVIEW_2:.*]] = memref.subview %[[REINTERPRET_CAST_1]][0] {{\[}}%[[SUBI_1]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-// CHECK:             %[[SUBVIEW_3:.*]] = memref.subview %[[ALLOC_1]][0] {{\[}}%[[SUBI_1]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
-// CHECK:             memref.copy %[[SUBVIEW_2]], %[[SUBVIEW_3]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
-// CHECK:             %[[TO_TENSOR_1:.*]] = bufferization.to_tensor %[[ALLOC_1]] restrict writable : memref<256xf32> to tensor<256xf32>
-// CHECK:             %[[GENERIC_4:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[TO_TENSOR_1]], %[[FILL_3]] : tensor<256xf32>, tensor<256xf32>) outs(%[[TO_TENSOR_1]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_16:.*]]: f32, %[[VAL_17:.*]]: f32, %[[VAL_18:.*]]: f32):
-// CHECK:               %[[SUBF_0:.*]] = arith.subf %[[VAL_16]], %[[VAL_17]] : f32
-// CHECK:               linalg.yield %[[SUBF_0]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             %[[GENERIC_5:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_3]], %[[GENERIC_4]], %[[FILL_0]] : tensor<256xi1>, tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_4]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_19:.*]]: i1, %[[VAL_20:.*]]: f32, %[[VAL_21:.*]]: f32, %[[VAL_22:.*]]: f32):
-// CHECK:               %[[SELECT_0:.*]] = arith.select %[[VAL_19]], %[[VAL_20]], %[[VAL_21]] : f32
-// CHECK:               linalg.yield %[[SELECT_0]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             %[[GENERIC_6:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_5]], %[[GENERIC_5]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_5]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_23:.*]]: f32, %[[VAL_24:.*]]: f32, %[[VAL_25:.*]]: f32):
-// CHECK:               %[[MULF_0:.*]] = arith.mulf %[[VAL_23]], %[[VAL_24]] : f32
-// CHECK:               linalg.yield %[[MULF_0]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             %[[GENERIC_7:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[VAL_9]], %[[GENERIC_6]] : tensor<256xf32>, tensor<256xf32>) outs(%[[VAL_9]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_26:.*]]: f32, %[[VAL_27:.*]]: f32, %[[VAL_28:.*]]: f32):
-// CHECK:               %[[ADDF_2:.*]] = arith.addf %[[VAL_26]], %[[VAL_27]] : f32
-// CHECK:               linalg.yield %[[ADDF_2]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             scf.yield %[[GENERIC_7]] : tensor<256xf32>
-// CHECK:           }
-// CHECK:           %[[REDUCE_1:.*]] = linalg.reduce ins(%[[FOR_1]] : tensor<256xf32>) outs(%[[FILL_2]] : tensor<f32>) dimensions = [0]
-// CHECK:             (%[[VAL_29:.*]]: f32, %[[VAL_30:.*]]: f32) {
-// CHECK:               %[[ADDF_3:.*]] = arith.addf %[[VAL_29]], %[[VAL_30]] : f32
-// CHECK:               linalg.yield %[[ADDF_3]] : f32
-// CHECK:             }
-// CHECK:           %[[EXTRACT_1:.*]] = tensor.extract %[[REDUCE_1]][] : tensor<f32>
-// CHECK:           %[[DIVF_1:.*]] = arith.divf %[[EXTRACT_1]], %[[SITOFP_0]] : f32
-// CHECK:           %[[ADDF_4:.*]] = arith.addf %[[DIVF_1]], %[[ARG8]] : f32
-// CHECK:           %[[SQRT_0:.*]] = math.sqrt %[[ADDF_4]] : f32
-// CHECK:           %[[DIVF_2:.*]] = arith.divf %[[CONSTANT_4]], %[[SQRT_0]] : f32
-// CHECK:           %[[INDEX_CAST_6:.*]] = arith.index_cast %[[ARG12]] : i32 to index
-// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG4]] to offset: {{\[}}%[[INDEX_CAST_6]]], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
-// CHECK:           affine.store %[[DIVF_0]], %[[REINTERPRET_CAST_2]][0] : memref<1xf32, strided<[1], offset: ?>>
-// CHECK:           %[[REINTERPRET_CAST_3:.*]] = memref.reinterpret_cast %[[ARG5]] to offset: {{\[}}%[[INDEX_CAST_6]]], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
-// CHECK:           affine.store %[[DIVF_2]], %[[REINTERPRET_CAST_3]][0] : memref<1xf32, strided<[1], offset: ?>>
-// CHECK:           %[[FILL_5:.*]] = linalg.fill ins(%[[DIVF_2]] : f32) outs(%[[EMPTY_0]] : tensor<256xf32>) -> tensor<256xf32>
-// CHECK:           scf.for %[[VAL_31:.*]] = %[[CONSTANT_2]] to %[[ARG7]] step %[[CONSTANT_3]]  : i32 {
-// CHECK:             %[[INDEX_CAST_7:.*]] = arith.index_cast %[[VAL_31]] : i32 to index
-// CHECK:             %[[ADDI_5:.*]] = arith.addi %[[INDEX_CAST_7]], %[[CONSTANT_0]] : index
-// CHECK:             %[[INDEX_CAST_8:.*]] = arith.index_cast %[[ARG7]] : i32 to index
-// CHECK:             %[[MINSI_2:.*]] = arith.minsi %[[ADDI_5]], %[[INDEX_CAST_8]] : index
-// CHECK:             %[[MAXSI_2:.*]] = arith.maxsi %[[MINSI_2]], %[[INDEX_CAST_7]] : index
-// CHECK:             %[[SUBI_2:.*]] = arith.subi %[[MAXSI_2]], %[[INDEX_CAST_7]] : index
-// CHECK:             %[[REINTERPRET_CAST_4:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: {{\[}}%[[INDEX_CAST_7]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
-// CHECK:             %[[ALLOC_2:.*]] = memref.alloc() : memref<256xf32>
-// CHECK:             %[[SUBVIEW_4:.*]] = memref.subview %[[REINTERPRET_CAST_4]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-// CHECK:             %[[SUBVIEW_5:.*]] = memref.subview %[[ALLOC_2]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
-// CHECK:             memref.copy %[[SUBVIEW_4]], %[[SUBVIEW_5]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
-// CHECK:             %[[TO_TENSOR_2:.*]] = bufferization.to_tensor %[[ALLOC_2]] restrict writable : memref<256xf32> to tensor<256xf32>
-// CHECK:             %[[REINTERPRET_CAST_5:.*]] = memref.reinterpret_cast %[[ARG3]] to offset: {{\[}}%[[INDEX_CAST_7]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
-// CHECK:             %[[ALLOC_3:.*]] = memref.alloc() : memref<256xf32>
-// CHECK:             %[[SUBVIEW_6:.*]] = memref.subview %[[REINTERPRET_CAST_5]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-// CHECK:             %[[SUBVIEW_7:.*]] = memref.subview %[[ALLOC_3]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
-// CHECK:             memref.copy %[[SUBVIEW_6]], %[[SUBVIEW_7]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
-// CHECK:             %[[TO_TENSOR_3:.*]] = bufferization.to_tensor %[[ALLOC_3]] restrict writable : memref<256xf32> to tensor<256xf32>
-// CHECK:             %[[ADDI_6:.*]] = arith.addi %[[INDEX_CAST_0]], %[[INDEX_CAST_7]] : index
-// CHECK:             %[[REINTERPRET_CAST_6:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_6]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
-// CHECK:             %[[ALLOC_4:.*]] = memref.alloc() : memref<256xf32>
-// CHECK:             %[[CMPI_3:.*]] = arith.cmpi slt, %[[SUBI_2]], %[[CONSTANT_0]] : index
-// CHECK:             scf.if %[[CMPI_3]] {
-// CHECK:               linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[ALLOC_4]] : memref<256xf32>)
-// CHECK:             }
-// CHECK:             %[[SUBVIEW_8:.*]] = memref.subview %[[REINTERPRET_CAST_6]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-// CHECK:             %[[SUBVIEW_9:.*]] = memref.subview %[[ALLOC_4]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
-// CHECK:             memref.copy %[[SUBVIEW_8]], %[[SUBVIEW_9]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
-// CHECK:             %[[TO_TENSOR_4:.*]] = bufferization.to_tensor %[[ALLOC_4]] restrict writable : memref<256xf32> to tensor<256xf32>
-// CHECK:             %[[GENERIC_8:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[TO_TENSOR_4]], %[[FILL_3]] : tensor<256xf32>, tensor<256xf32>) outs(%[[TO_TENSOR_4]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_32:.*]]: f32, %[[VAL_33:.*]]: f32, %[[VAL_34:.*]]: f32):
-// CHECK:               %[[SUBF_1:.*]] = arith.subf %[[VAL_32]], %[[VAL_33]] : f32
-// CHECK:               linalg.yield %[[SUBF_1]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             %[[GENERIC_9:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_8]], %[[FILL_5]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_8]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_35:.*]]: f32, %[[VAL_36:.*]]: f32, %[[VAL_37:.*]]: f32):
-// CHECK:               %[[MULF_1:.*]] = arith.mulf %[[VAL_35]], %[[VAL_36]] : f32
-// CHECK:               linalg.yield %[[MULF_1]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             %[[GENERIC_10:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_9]], %[[TO_TENSOR_2]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_9]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_38:.*]]: f32, %[[VAL_39:.*]]: f32, %[[VAL_40:.*]]: f32):
-// CHECK:               %[[MULF_2:.*]] = arith.mulf %[[VAL_38]], %[[VAL_39]] : f32
-// CHECK:               linalg.yield %[[MULF_2]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             %[[GENERIC_11:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_10]], %[[TO_TENSOR_3]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_10]] : tensor<256xf32>) {
-// CHECK:             ^bb0(%[[VAL_41:.*]]: f32, %[[VAL_42:.*]]: f32, %[[VAL_43:.*]]: f32):
-// CHECK:               %[[ADDF_5:.*]] = arith.addf %[[VAL_41]], %[[VAL_42]] : f32
-// CHECK:               linalg.yield %[[ADDF_5]] : f32
-// CHECK:             } -> tensor<256xf32>
-// CHECK:             %[[REINTERPRET_CAST_7:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[ADDI_6]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
-// CHECK:             %[[EXTRACT_SLICE_0:.*]] = tensor.extract_slice %[[GENERIC_11]][0] {{\[}}%[[SUBI_2]]] [1] : tensor<256xf32> to tensor<?xf32>
-// CHECK:             %[[SUBVIEW_10:.*]] = memref.subview %[[REINTERPRET_CAST_7]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-// CHECK:             bufferization.materialize_in_destination %[[EXTRACT_SLICE_0]] in writable %[[SUBVIEW_10]] : (tensor<?xf32>, memref<?xf32, strided<[1], offset: ?>>) -> ()
-// CHECK:           }
-// CHECK:           return
-// CHECK:         }
 module {
   tt.func public @_layer_norm_fwd_fused_0123456789(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>, %arg2: !tt.ptr<f32>, %arg3: !tt.ptr<f32>, %arg4: !tt.ptr<f32>, %arg5: !tt.ptr<f32>, %arg6: i32, %arg7: i32, %arg8: f32) {
     %c256_i32 = arith.constant 256 : i32
@@ -292,3 +96,200 @@ module {
     tt.return
   }
 }
+
+// CHECK lines should be minimized and named to reflect the test’s intent.
+// CHECK: #[[$ATTR_0:.+]] = affine_map<(d0) -> (d0)>
+// CHECK-LABEL:   func.func @_layer_norm_fwd_fused_0123456789(
+// CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG2:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG3:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG4:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG5:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: memref<f32>,
+// CHECK-SAME:      %[[ARG6:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG7:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG8:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: f32,
+// CHECK-SAME:      %[[ARG9:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG10:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG11:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG12:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG13:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32,
+// CHECK-SAME:      %[[ARG14:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: i32) attributes {llvm.bareptr} {
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 256 : index
+// CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0.000000e+00 : f32
+// CHECK:           %[[CONSTANT_2:.*]] = arith.constant 256 : i32
+// CHECK:           %[[CONSTANT_3:.*]] = arith.constant 0 : i32
+// CHECK:           %[[CONSTANT_4:.*]] = arith.constant 1.000000e+00 : f32
+// CHECK:           %[[EMPTY_0:.*]] = tensor.empty() : tensor<256xf32>
+// CHECK:           %[[FILL_0:.*]] = linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[EMPTY_0]] : tensor<256xf32>) -> tensor<256xf32>
+// CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG12]], %[[ARG6]] : i32
+// CHECK:           %[[INDEX_CAST_0:.*]] = arith.index_cast %[[MULI_0]] : i32 to index
+// CHECK:           %[[EMPTY_1:.*]] = tensor.empty() : tensor<256xi32>
+// CHECK:           %[[GENERIC_0:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]]], iterator_types = ["parallel"]} outs(%[[EMPTY_1]] : tensor<256xi32>) {
+// CHECK:           ^bb0(%[[VAL_0:.*]]: i32):
+// CHECK:             %[[INDEX_0:.*]] = linalg.index 0 : index
+// CHECK:             %[[INDEX_CAST_1:.*]] = arith.index_cast %[[INDEX_0]] : index to i32
+// CHECK:             linalg.yield %[[INDEX_CAST_1]] : i32
+// CHECK:           } -> tensor<256xi32>
+// CHECK:           %[[FILL_1:.*]] = linalg.fill ins(%[[ARG7]] : i32) outs(%[[EMPTY_1]] : tensor<256xi32>) -> tensor<256xi32>
+// CHECK:           %[[FOR_0:.*]] = scf.for %[[VAL_1:.*]] = %[[CONSTANT_3]] to %[[ARG7]] step %[[CONSTANT_2]] iter_args(%[[VAL_2:.*]] = %[[FILL_0]]) -> (tensor<256xf32>)  : i32 {
+// CHECK:             %[[INDEX_CAST_2:.*]] = arith.index_cast %[[VAL_1]] : i32 to index
+// CHECK:             %[[ADDI_0:.*]] = arith.addi %[[INDEX_CAST_0]], %[[INDEX_CAST_2]] : index
+// CHECK:             %[[ADDI_1:.*]] = arith.addi %[[INDEX_CAST_2]], %[[CONSTANT_0]] : index
+// CHECK:             %[[INDEX_CAST_3:.*]] = arith.index_cast %[[ARG7]] : i32 to index
+// CHECK:             %[[MINSI_0:.*]] = arith.minsi %[[ADDI_1]], %[[INDEX_CAST_3]] : index
+// CHECK:             %[[MAXSI_0:.*]] = arith.maxsi %[[MINSI_0]], %[[INDEX_CAST_2]] : index
+// CHECK:             %[[SUBI_0:.*]] = arith.subi %[[MAXSI_0]], %[[INDEX_CAST_2]] : index
+// CHECK:             %[[REINTERPRET_CAST_0:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_0]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
+// CHECK:             %[[ALLOC_0:.*]] = memref.alloc() : memref<256xf32>
+// CHECK:             %[[CMPI_0:.*]] = arith.cmpi slt, %[[SUBI_0]], %[[CONSTANT_0]] : index
+// CHECK:             scf.if %[[CMPI_0]] {
+// CHECK:               linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[ALLOC_0]] : memref<256xf32>)
+// CHECK:             }
+// CHECK:             %[[SUBVIEW_0:.*]] = memref.subview %[[REINTERPRET_CAST_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
+// CHECK:             %[[SUBVIEW_1:.*]] = memref.subview %[[ALLOC_0]][0] {{\[}}%[[SUBI_0]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
+// CHECK:             memref.copy %[[SUBVIEW_0]], %[[SUBVIEW_1]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
+// CHECK:             %[[TO_TENSOR_0:.*]] = bufferization.to_tensor %[[ALLOC_0]] restrict writable : memref<256xf32> to tensor<256xf32>
+// CHECK:             %[[GENERIC_1:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[VAL_2]], %[[TO_TENSOR_0]] : tensor<256xf32>, tensor<256xf32>) outs(%[[VAL_2]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_3:.*]]: f32, %[[VAL_4:.*]]: f32, %[[VAL_5:.*]]: f32):
+// CHECK:               %[[ADDF_0:.*]] = arith.addf %[[VAL_3]], %[[VAL_4]] : f32
+// CHECK:               linalg.yield %[[ADDF_0]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             scf.yield %[[GENERIC_1]] : tensor<256xf32>
+// CHECK:           }
+// CHECK:           %[[EMPTY_2:.*]] = tensor.empty() : tensor<f32>
+// CHECK:           %[[FILL_2:.*]] = linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[EMPTY_2]] : tensor<f32>) -> tensor<f32>
+// CHECK:           %[[REDUCE_0:.*]] = linalg.reduce ins(%[[FOR_0]] : tensor<256xf32>) outs(%[[FILL_2]] : tensor<f32>) dimensions = [0]
+// CHECK:             (%[[VAL_6:.*]]: f32, %[[VAL_7:.*]]: f32) {
+// CHECK:               %[[ADDF_1:.*]] = arith.addf %[[VAL_6]], %[[VAL_7]] : f32
+// CHECK:               linalg.yield %[[ADDF_1]] : f32
+// CHECK:             }
+// CHECK:           %[[EXTRACT_0:.*]] = tensor.extract %[[REDUCE_0]][] : tensor<f32>
+// CHECK:           %[[SITOFP_0:.*]] = arith.sitofp %[[ARG7]] : i32 to f32
+// CHECK:           %[[DIVF_0:.*]] = arith.divf %[[EXTRACT_0]], %[[SITOFP_0]] : f32
+// CHECK:           %[[FILL_3:.*]] = linalg.fill ins(%[[DIVF_0]] : f32) outs(%[[EMPTY_0]] : tensor<256xf32>) -> tensor<256xf32>
+// CHECK:           %[[FOR_1:.*]] = scf.for %[[VAL_8:.*]] = %[[CONSTANT_3]] to %[[ARG7]] step %[[CONSTANT_2]] iter_args(%[[VAL_9:.*]] = %[[FILL_0]]) -> (tensor<256xf32>)  : i32 {
+// CHECK:             %[[FILL_4:.*]] = linalg.fill ins(%[[VAL_8]] : i32) outs(%[[EMPTY_1]] : tensor<256xi32>) -> tensor<256xi32>
+// CHECK:             %[[GENERIC_2:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[FILL_4]], %[[GENERIC_0]] : tensor<256xi32>, tensor<256xi32>) outs(%[[FILL_4]] : tensor<256xi32>) {
+// CHECK:             ^bb0(%[[VAL_10:.*]]: i32, %[[VAL_11:.*]]: i32, %[[VAL_12:.*]]: i32):
+// CHECK:               %[[ADDI_2:.*]] = arith.addi %[[VAL_10]], %[[VAL_11]] : i32
+// CHECK:               linalg.yield %[[ADDI_2]] : i32
+// CHECK:             } -> tensor<256xi32>
+// CHECK:             %[[EMPTY_3:.*]] = tensor.empty() : tensor<256xi1>
+// CHECK:             %[[GENERIC_3:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_2]], %[[FILL_1]] : tensor<256xi32>, tensor<256xi32>) outs(%[[EMPTY_3]] : tensor<256xi1>) {
+// CHECK:             ^bb0(%[[VAL_13:.*]]: i32, %[[VAL_14:.*]]: i32, %[[VAL_15:.*]]: i1):
+// CHECK:               %[[CMPI_1:.*]] = arith.cmpi slt, %[[VAL_13]], %[[VAL_14]] : i32
+// CHECK:               linalg.yield %[[CMPI_1]] : i1
+// CHECK:             } -> tensor<256xi1>
+// CHECK:             %[[INDEX_CAST_4:.*]] = arith.index_cast %[[VAL_8]] : i32 to index
+// CHECK:             %[[ADDI_3:.*]] = arith.addi %[[INDEX_CAST_0]], %[[INDEX_CAST_4]] : index
+// CHECK:             %[[ADDI_4:.*]] = arith.addi %[[INDEX_CAST_4]], %[[CONSTANT_0]] : index
+// CHECK:             %[[INDEX_CAST_5:.*]] = arith.index_cast %[[ARG7]] : i32 to index
+// CHECK:             %[[MINSI_1:.*]] = arith.minsi %[[ADDI_4]], %[[INDEX_CAST_5]] : index
+// CHECK:             %[[MAXSI_1:.*]] = arith.maxsi %[[MINSI_1]], %[[INDEX_CAST_4]] : index
+// CHECK:             %[[SUBI_1:.*]] = arith.subi %[[MAXSI_1]], %[[INDEX_CAST_4]] : index
+// CHECK:             %[[REINTERPRET_CAST_1:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_3]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
+// CHECK:             %[[ALLOC_1:.*]] = memref.alloc() : memref<256xf32>
+// CHECK:             %[[CMPI_2:.*]] = arith.cmpi slt, %[[SUBI_1]], %[[CONSTANT_0]] : index
+// CHECK:             scf.if %[[CMPI_2]] {
+// CHECK:               linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[ALLOC_1]] : memref<256xf32>)
+// CHECK:             }
+// CHECK:             %[[SUBVIEW_2:.*]] = memref.subview %[[REINTERPRET_CAST_1]][0] {{\[}}%[[SUBI_1]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
+// CHECK:             %[[SUBVIEW_3:.*]] = memref.subview %[[ALLOC_1]][0] {{\[}}%[[SUBI_1]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
+// CHECK:             memref.copy %[[SUBVIEW_2]], %[[SUBVIEW_3]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
+// CHECK:             %[[TO_TENSOR_1:.*]] = bufferization.to_tensor %[[ALLOC_1]] restrict writable : memref<256xf32> to tensor<256xf32>
+// CHECK:             %[[GENERIC_4:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[TO_TENSOR_1]], %[[FILL_3]] : tensor<256xf32>, tensor<256xf32>) outs(%[[TO_TENSOR_1]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_16:.*]]: f32, %[[VAL_17:.*]]: f32, %[[VAL_18:.*]]: f32):
+// CHECK:               %[[SUBF_0:.*]] = arith.subf %[[VAL_16]], %[[VAL_17]] : f32
+// CHECK:               linalg.yield %[[SUBF_0]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             %[[GENERIC_5:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_3]], %[[GENERIC_4]], %[[FILL_0]] : tensor<256xi1>, tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_4]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_19:.*]]: i1, %[[VAL_20:.*]]: f32, %[[VAL_21:.*]]: f32, %[[VAL_22:.*]]: f32):
+// CHECK:               %[[SELECT_0:.*]] = arith.select %[[VAL_19]], %[[VAL_20]], %[[VAL_21]] : f32
+// CHECK:               linalg.yield %[[SELECT_0]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             %[[GENERIC_6:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_5]], %[[GENERIC_5]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_5]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_23:.*]]: f32, %[[VAL_24:.*]]: f32, %[[VAL_25:.*]]: f32):
+// CHECK:               %[[MULF_0:.*]] = arith.mulf %[[VAL_23]], %[[VAL_24]] : f32
+// CHECK:               linalg.yield %[[MULF_0]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             %[[GENERIC_7:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[VAL_9]], %[[GENERIC_6]] : tensor<256xf32>, tensor<256xf32>) outs(%[[VAL_9]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_26:.*]]: f32, %[[VAL_27:.*]]: f32, %[[VAL_28:.*]]: f32):
+// CHECK:               %[[ADDF_2:.*]] = arith.addf %[[VAL_26]], %[[VAL_27]] : f32
+// CHECK:               linalg.yield %[[ADDF_2]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             scf.yield %[[GENERIC_7]] : tensor<256xf32>
+// CHECK:           }
+// CHECK:           %[[REDUCE_1:.*]] = linalg.reduce ins(%[[FOR_1]] : tensor<256xf32>) outs(%[[FILL_2]] : tensor<f32>) dimensions = [0]
+// CHECK:             (%[[VAL_29:.*]]: f32, %[[VAL_30:.*]]: f32) {
+// CHECK:               %[[ADDF_3:.*]] = arith.addf %[[VAL_29]], %[[VAL_30]] : f32
+// CHECK:               linalg.yield %[[ADDF_3]] : f32
+// CHECK:             }
+// CHECK:           %[[EXTRACT_1:.*]] = tensor.extract %[[REDUCE_1]][] : tensor<f32>
+// CHECK:           %[[DIVF_1:.*]] = arith.divf %[[EXTRACT_1]], %[[SITOFP_0]] : f32
+// CHECK:           %[[ADDF_4:.*]] = arith.addf %[[DIVF_1]], %[[ARG8]] : f32
+// CHECK:           %[[SQRT_0:.*]] = math.sqrt %[[ADDF_4]] : f32
+// CHECK:           %[[DIVF_2:.*]] = arith.divf %[[CONSTANT_4]], %[[SQRT_0]] : f32
+// CHECK:           %[[INDEX_CAST_6:.*]] = arith.index_cast %[[ARG12]] : i32 to index
+// CHECK:           %[[REINTERPRET_CAST_2:.*]] = memref.reinterpret_cast %[[ARG4]] to offset: {{\[}}%[[INDEX_CAST_6]]], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
+// CHECK:           affine.store %[[DIVF_0]], %[[REINTERPRET_CAST_2]][0] : memref<1xf32, strided<[1], offset: ?>>
+// CHECK:           %[[REINTERPRET_CAST_3:.*]] = memref.reinterpret_cast %[[ARG5]] to offset: {{\[}}%[[INDEX_CAST_6]]], sizes: [1], strides: [1] : memref<f32> to memref<1xf32, strided<[1], offset: ?>>
+// CHECK:           affine.store %[[DIVF_2]], %[[REINTERPRET_CAST_3]][0] : memref<1xf32, strided<[1], offset: ?>>
+// CHECK:           %[[FILL_5:.*]] = linalg.fill ins(%[[DIVF_2]] : f32) outs(%[[EMPTY_0]] : tensor<256xf32>) -> tensor<256xf32>
+// CHECK:           scf.for %[[VAL_31:.*]] = %[[CONSTANT_3]] to %[[ARG7]] step %[[CONSTANT_2]]  : i32 {
+// CHECK:             %[[INDEX_CAST_7:.*]] = arith.index_cast %[[VAL_31]] : i32 to index
+// CHECK:             %[[ADDI_5:.*]] = arith.addi %[[INDEX_CAST_7]], %[[CONSTANT_0]] : index
+// CHECK:             %[[INDEX_CAST_8:.*]] = arith.index_cast %[[ARG7]] : i32 to index
+// CHECK:             %[[MINSI_2:.*]] = arith.minsi %[[ADDI_5]], %[[INDEX_CAST_8]] : index
+// CHECK:             %[[MAXSI_2:.*]] = arith.maxsi %[[MINSI_2]], %[[INDEX_CAST_7]] : index
+// CHECK:             %[[SUBI_2:.*]] = arith.subi %[[MAXSI_2]], %[[INDEX_CAST_7]] : index
+// CHECK:             %[[REINTERPRET_CAST_4:.*]] = memref.reinterpret_cast %[[ARG2]] to offset: {{\[}}%[[INDEX_CAST_7]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
+// CHECK:             %[[ALLOC_2:.*]] = memref.alloc() : memref<256xf32>
+// CHECK:             %[[SUBVIEW_4:.*]] = memref.subview %[[REINTERPRET_CAST_4]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
+// CHECK:             %[[SUBVIEW_5:.*]] = memref.subview %[[ALLOC_2]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
+// CHECK:             memref.copy %[[SUBVIEW_4]], %[[SUBVIEW_5]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
+// CHECK:             %[[TO_TENSOR_2:.*]] = bufferization.to_tensor %[[ALLOC_2]] restrict writable : memref<256xf32> to tensor<256xf32>
+// CHECK:             %[[REINTERPRET_CAST_5:.*]] = memref.reinterpret_cast %[[ARG3]] to offset: {{\[}}%[[INDEX_CAST_7]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
+// CHECK:             %[[ALLOC_3:.*]] = memref.alloc() : memref<256xf32>
+// CHECK:             %[[SUBVIEW_6:.*]] = memref.subview %[[REINTERPRET_CAST_5]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
+// CHECK:             %[[SUBVIEW_7:.*]] = memref.subview %[[ALLOC_3]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
+// CHECK:             memref.copy %[[SUBVIEW_6]], %[[SUBVIEW_7]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
+// CHECK:             %[[TO_TENSOR_3:.*]] = bufferization.to_tensor %[[ALLOC_3]] restrict writable : memref<256xf32> to tensor<256xf32>
+// CHECK:             %[[ADDI_6:.*]] = arith.addi %[[INDEX_CAST_0]], %[[INDEX_CAST_7]] : index
+// CHECK:             %[[REINTERPRET_CAST_6:.*]] = memref.reinterpret_cast %[[ARG0]] to offset: {{\[}}%[[ADDI_6]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
+// CHECK:             %[[ALLOC_4:.*]] = memref.alloc() : memref<256xf32>
+// CHECK:             %[[CMPI_3:.*]] = arith.cmpi slt, %[[SUBI_2]], %[[CONSTANT_0]] : index
+// CHECK:             scf.if %[[CMPI_3]] {
+// CHECK:               linalg.fill ins(%[[CONSTANT_1]] : f32) outs(%[[ALLOC_4]] : memref<256xf32>)
+// CHECK:             }
+// CHECK:             %[[SUBVIEW_8:.*]] = memref.subview %[[REINTERPRET_CAST_6]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
+// CHECK:             %[[SUBVIEW_9:.*]] = memref.subview %[[ALLOC_4]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32> to memref<?xf32, strided<[1]>>
+// CHECK:             memref.copy %[[SUBVIEW_8]], %[[SUBVIEW_9]] : memref<?xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1]>>
+// CHECK:             %[[TO_TENSOR_4:.*]] = bufferization.to_tensor %[[ALLOC_4]] restrict writable : memref<256xf32> to tensor<256xf32>
+// CHECK:             %[[GENERIC_8:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[TO_TENSOR_4]], %[[FILL_3]] : tensor<256xf32>, tensor<256xf32>) outs(%[[TO_TENSOR_4]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_32:.*]]: f32, %[[VAL_33:.*]]: f32, %[[VAL_34:.*]]: f32):
+// CHECK:               %[[SUBF_1:.*]] = arith.subf %[[VAL_32]], %[[VAL_33]] : f32
+// CHECK:               linalg.yield %[[SUBF_1]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             %[[GENERIC_9:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_8]], %[[FILL_5]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_8]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_35:.*]]: f32, %[[VAL_36:.*]]: f32, %[[VAL_37:.*]]: f32):
+// CHECK:               %[[MULF_1:.*]] = arith.mulf %[[VAL_35]], %[[VAL_36]] : f32
+// CHECK:               linalg.yield %[[MULF_1]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             %[[GENERIC_10:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_9]], %[[TO_TENSOR_2]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_9]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_38:.*]]: f32, %[[VAL_39:.*]]: f32, %[[VAL_40:.*]]: f32):
+// CHECK:               %[[MULF_2:.*]] = arith.mulf %[[VAL_38]], %[[VAL_39]] : f32
+// CHECK:               linalg.yield %[[MULF_2]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             %[[GENERIC_11:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_0]], #[[$ATTR_0]], #[[$ATTR_0]]], iterator_types = ["parallel"]} ins(%[[GENERIC_10]], %[[TO_TENSOR_3]] : tensor<256xf32>, tensor<256xf32>) outs(%[[GENERIC_10]] : tensor<256xf32>) {
+// CHECK:             ^bb0(%[[VAL_41:.*]]: f32, %[[VAL_42:.*]]: f32, %[[VAL_43:.*]]: f32):
+// CHECK:               %[[ADDF_5:.*]] = arith.addf %[[VAL_41]], %[[VAL_42]] : f32
+// CHECK:               linalg.yield %[[ADDF_5]] : f32
+// CHECK:             } -> tensor<256xf32>
+// CHECK:             %[[REINTERPRET_CAST_7:.*]] = memref.reinterpret_cast %[[ARG1]] to offset: {{\[}}%[[ADDI_6]]], sizes: [256], strides: [1] : memref<f32> to memref<256xf32, strided<[1], offset: ?>>
+// CHECK:             %[[EXTRACT_SLICE_0:.*]] = tensor.extract_slice %[[GENERIC_11]][0] {{\[}}%[[SUBI_2]]] [1] : tensor<256xf32> to tensor<?xf32>
+// CHECK:             %[[SUBVIEW_10:.*]] = memref.subview %[[REINTERPRET_CAST_7]][0] {{\[}}%[[SUBI_2]]] [1] : memref<256xf32, strided<[1], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
+// CHECK:             bufferization.materialize_in_destination %[[EXTRACT_SLICE_0]] in writable %[[SUBVIEW_10]] : (tensor<?xf32>, memref<?xf32, strided<[1], offset: ?>>) -> ()
+// CHECK:           }
+// CHECK:           return
+// CHECK:         }

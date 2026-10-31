@@ -29,7 +29,7 @@ module {
   }
 }
 
-
+// CHECK lines should be minimized and named to reflect the test’s intent.
 // CHECK-LABEL:   tt.func public @gather_simple_mask_no_other(
 // CHECK-SAME:      %[[ARG0:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>,
 // CHECK-SAME:      %[[ARG1:[0-9]+|[a-zA-Z$._-][a-zA-Z0-9$._-]*]]: !tt.ptr<f32>) attributes {noinline = false} {
@@ -41,13 +41,13 @@ module {
 // CHECK:           %[[CONSTANT_5:.*]] = arith.constant dense<4> : tensor<64xi32>
 // CHECK:           %[[CONSTANT_6:.*]] = arith.constant 16 : i32
 // CHECK:           %[[CONSTANT_7:.*]] = arith.constant dense<64> : tensor<64xi32>
-// CHECK:           %[[CONSTANT_8:.*]] = arith.constant 2 : i32
-// CHECK:           %[[CONSTANT_9:.*]] = arith.constant 1 : i32
-// CHECK:           %[[CONSTANT_10:.*]] = arith.constant 0 : i32
+// CHECK:           %[[CONSTANT_8:.*]] = arith.constant 0 : i32
+// CHECK:           %[[CONSTANT_9:.*]] = arith.constant 2 : i32
+// CHECK:           %[[CONSTANT_10:.*]] = arith.constant 1 : i32
 // CHECK:           %[[UNREALIZED_CONVERSION_CAST_0:.*]] = builtin.unrealized_conversion_cast %[[ARG1]] : !tt.ptr<f32> to memref<*xf32>
 // CHECK:           %[[UNREALIZED_CONVERSION_CAST_1:.*]] = builtin.unrealized_conversion_cast %[[ARG0]] : !tt.ptr<f32> to memref<*xf32>
 // CHECK:           %[[MAKE_RANGE_0:.*]] = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
-// CHECK:           %[[FOR_0:.*]]:3 = scf.for %[[VAL_0:.*]] = %[[CONSTANT_10]] to %[[CONSTANT_8]] step %[[CONSTANT_9]] iter_args(%[[VAL_1:.*]] = %[[CONSTANT_4]], %[[VAL_2:.*]] = %[[MAKE_RANGE_0]], %[[VAL_3:.*]] = %[[MAKE_RANGE_0]]) -> (i32, tensor<64xi32>, tensor<64xi32>)  : i32 {
+// CHECK:           %[[FOR_0:.*]]:3 = scf.for %[[VAL_0:.*]] = %[[CONSTANT_8]] to %[[CONSTANT_9]] step %[[CONSTANT_10]] iter_args(%[[VAL_1:.*]] = %[[CONSTANT_4]], %[[VAL_2:.*]] = %[[MAKE_RANGE_0]], %[[VAL_3:.*]] = %[[MAKE_RANGE_0]]) -> (i32, tensor<64xi32>, tensor<64xi32>)  : i32 {
 // CHECK:             %[[DIVSI_0:.*]] = arith.divsi %[[VAL_2]], %[[CONSTANT_5]] : tensor<64xi32>
 // CHECK:             %[[SPLAT_0:.*]] = tt.splat %[[VAL_1]] : i32 -> tensor<64xi32>
 // CHECK:             %[[CMPI_0:.*]] = arith.cmpi slt, %[[DIVSI_0]], %[[SPLAT_0]] : tensor<64xi32>

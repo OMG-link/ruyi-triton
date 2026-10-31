@@ -16,9 +16,11 @@ module {
 }
 
 // CHECK-LABEL:   tt.func public @atomic_add_tensor(
-// CHECK:           [[ATOM:%.+]] = tts.atomic_rmw fadd, relaxed, gpu, %arg2 into %arg0[%arg1] mask = %arg3 : tensor<4xf32> into (<f32>, tensor<4xi32>) -> tensor<4xf32>
+// CHECK:           [[INDEX:%.+]] = arith.index_cast %arg1 : tensor<4xi32> to tensor<4xindex>
+// CHECK:           [[ATOM:%.+]] = tts.atomic_rmw fadd, relaxed, gpu, %arg2 into %arg0[[[INDEX]]] mask = %arg3 : tensor<4xf32> into (<f32>, tensor<4xindex>) -> tensor<4xf32>
 // CHECK:           tt.return [[ATOM]] : tensor<4xf32>
 
 // CHECK-LABEL:   tt.func public @atomic_cas_scalar(
-// CHECK:           [[CAS:%.+]] = tts.atomic_cas acq_rel, gpu, %arg2, %arg3 into %arg0[%arg1] : i32, i32 into (<i32>, i32) -> i32
+// CHECK:           [[OFFSET:%.+]] = arith.index_cast %arg1 : i32 to index
+// CHECK:           [[CAS:%.+]] = tts.atomic_cas acq_rel, gpu, %arg2, %arg3 into %arg0[[[OFFSET]]] : i32, i32 into (<i32>, index) -> i32
 // CHECK:           tt.return [[CAS]] : i32

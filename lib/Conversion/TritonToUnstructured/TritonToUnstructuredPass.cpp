@@ -20,9 +20,9 @@
 //
 // Example:
 //
-// %12 = tts.gather %arg0[%10] : (<f32>, tensor<64xi64>) -> tensor<64xf32>
+// %12 = tts.gather %arg0[%10] : (<f32>, tensor<64xindex>) -> tensor<64xf32>
 // tts.scatter %12 into %arg1[%arg3] : tensor<64xf32> into (<f32>,
-// tensor<64xi32>)
+// tensor<64xindex>)
 //
 // Current assumptions and limitations:
 //   - For simplicity, the pass assumes that gather / scatter operations load /
@@ -98,15 +98,12 @@
 //   - a tensor of offsets (or single offset) that indicates the offsets from
 //   the base pointer
 //
-// All intermediate tt.addptr ops are converted to arith.addi ops that compute
-// the offsets. Offsets start at 0 with the provided bit-width. All pointer
-// shape manipulation ops such as tt.splat and tt.broadcast will instead operate
-// on the offsets and will be converted to linalg in triton-arith-to-linalg.
-//
-// By default, the pass uses i32 for the initial offsets of all pointers
-// (configurable via offset-bit-width=width). If any intermediate tt.addptr
-// introduces a larger bitwidth offset, the offsets will be sign-extended to the
-// larger bitwidth.
+// Each incoming offset is signed-cast to index at the tt.addptr boundary.
+// Explicit integer expressions keep their original types and wrapping behavior.
+// Accumulation and loop-carried displacements use index (or tensor<index>).
+// Pointer shape operations retain their operations and instead manipulate
+// index tensors.
+// The final LLVM lowering must use the target's pointer-index width.
 //
 ////////////////////////////////////////////////////////////////////////////////
 // Algorithm
@@ -123,18 +120,6 @@
 // also set the type of the iter-arg and result directly which is usually frown
 // upon (but justified).
 //
-// This approach is used in favor of the traditional ConversionPatternRewriter
-// which converts all pointer type into an offset integer type because
-// TypeConverter does not support dynamic type based on value. This limitation
-// means we have to decide the same bitwidth for all tt.addptr sequences which
-// is not ideal.
-//
-// For instance, assuming we have two sequences of tt.addptr: one operates on
-// 32-bit offsets while the other operates on 64-bit offsets. If we set the
-// default bitwidth to 64, the 32-bit sequence will require unncessary
-// sign-extending when computing the offsets. Contrast this with the manual
-// approach, we will only sign-extend where necessary.
-
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
@@ -185,38 +170,13 @@ using namespace triton;
 
 namespace {
 
-// Given a type, return the offset type corresponding to that type with the
-// specified width.
-// If the type is a tensor, return a tensor of offsets of the same shape. If the
-// type is a pointer, return a single offset type.
-static Type getPtrOffsetType(Type type, unsigned int bitWidth) {
-  if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
-    if (auto ptrType =
-            dyn_cast<triton::PointerType>(tensorType.getElementType())) {
-      return RankedTensorType::get(
-          tensorType.getShape(), IntegerType::get(type.getContext(), bitWidth));
-    }
-  }
-
-  if (auto ptrType = dyn_cast<triton::PointerType>(type)) {
-    return IntegerType::get(type.getContext(), bitWidth);
-  }
-
-  llvm_unreachable("unexpected type");
-  return nullptr;
-}
-
-static unsigned int getBitWidth(Type type) {
-  if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
-    if (auto integerType = dyn_cast<IntegerType>(tensorType.getElementType())) {
-      return integerType.getWidth();
-    }
-  } else if (auto integerType = dyn_cast<IntegerType>(type)) {
-    return integerType.getWidth();
-  }
-
-  llvm_unreachable("unexpected type");
-  return 0;
+// Preserve the pointer tensor's shape while using target-sized displacements.
+static Type getPtrOffsetType(Type type) {
+  if (auto tensorType = dyn_cast<RankedTensorType>(type))
+    return RankedTensorType::get(tensorType.getShape(),
+                                 IndexType::get(type.getContext()));
+  assert(isa<triton::PointerType>(type));
+  return IndexType::get(type.getContext());
 }
 
 static bool isPointerPreservingDerivedOp(Operation *op) {
@@ -273,9 +233,6 @@ public:
     // the pointer type that corresponds to this offset; used when
     // creating tts.make_unstructured_tptr
     Type ptrType;
-    // bitwidth that is used for this offset, used to track if sign-extension is
-    // necessary
-    unsigned int bitWidth;
     // the offset value
     Value offset;
   };
@@ -323,52 +280,11 @@ public:
       return offset;
     }
 
-    Type sourceElementType = getOffsetElementType(offset.getType());
-    Type targetElementType = getOffsetElementType(targetType);
-    if (targetElementType.isIndex()) {
-      return builder.create<arith::IndexCastOp>(loc, targetType, offset);
-    }
-
-    if (sourceElementType.isIndex()) {
-      return builder.create<arith::IndexCastOp>(loc, targetType, offset);
-    }
-
-    auto srcInt = dyn_cast<IntegerType>(sourceElementType);
-    auto dstInt = dyn_cast<IntegerType>(targetElementType);
-    if (srcInt && dstInt) {
-      if (srcInt.getWidth() < dstInt.getWidth()) {
-        return builder.create<arith::ExtSIOp>(loc, targetType, offset);
-      }
-      if (srcInt.getWidth() > dstInt.getWidth()) {
-        return builder.create<arith::TruncIOp>(loc, targetType, offset);
-      }
-    }
-
-    llvm_unreachable("unexpected offset type conversion");
-    return nullptr;
+    assert(getOffsetElementType(targetType).isIndex());
+    return builder.create<arith::IndexCastOp>(loc, targetType, offset);
   }
 
-  static Value castOrSplatOffset(Value offset, Type targetType, Location loc,
-                                 OpBuilder &builder) {
-    if (offset.getType() == targetType) {
-      return offset;
-    }
-
-    if (auto targetTensorType = dyn_cast<RankedTensorType>(targetType)) {
-      if (isa<RankedTensorType>(offset.getType())) {
-        return castOffset(offset, targetType, loc, builder);
-      }
-      auto elementType = targetTensorType.getElementType();
-      Value scalarOffset = castOffset(offset, elementType, loc, builder);
-      return builder.create<triton::SplatOp>(loc, targetTensorType,
-                                             scalarOffset);
-    }
-
-    return castOffset(offset, targetType, loc, builder);
-  }
-
-  LogicalResult processUnstructuredPtrs(ModuleOp root,
-                                        unsigned int defaultBitWidth = 32) {
+  LogicalResult processUnstructuredPtrs(ModuleOp root) {
     llvm::SmallDenseSet<Value> ptrArgs;
     llvm::DenseMap<Value, PtrOffset> offsetMap;
     std::queue<Value> workList;
@@ -380,13 +296,11 @@ public:
         }
 
         OpBuilder b(func->getRegion(0));
-        Value zero = b.create<arith::ConstantOp>(
-            arg.getLoc(),
-            b.getIntegerAttr(IntegerType::get(&getContext(), defaultBitWidth),
-                             0));
+        Value zero =
+            b.create<arith::ConstantOp>(arg.getLoc(), b.getIndexAttr(0));
 
         ptrArgs.insert(arg);
-        offsetMap.insert({arg, {arg, arg.getType(), defaultBitWidth, zero}});
+        offsetMap.insert({arg, {arg, arg.getType(), zero}});
         workList.push(arg);
       }
     });
@@ -395,13 +309,10 @@ public:
     root.walk([&](triton::AllocScratchOp op) {
       auto res = op.getResult();
       OpBuilder b(op);
-      Value zero = b.create<arith::ConstantOp>(
-          op.getLoc(),
-          b.getIntegerAttr(IntegerType::get(&getContext(), defaultBitWidth),
-                           0));
+      Value zero = b.create<arith::ConstantOp>(op.getLoc(), b.getIndexAttr(0));
 
       ptrArgs.insert(res);
-      offsetMap.insert({res, {res, res.getType(), defaultBitWidth, zero}});
+      offsetMap.insert({res, {res, res.getType(), zero}});
       workList.push(res);
     });
 
@@ -413,12 +324,9 @@ public:
       }
       auto res = op.getResult();
       OpBuilder b(op);
-      Value zero = b.create<arith::ConstantOp>(
-          op.getLoc(),
-          b.getIntegerAttr(IntegerType::get(&getContext(), defaultBitWidth),
-                           0));
+      Value zero = b.create<arith::ConstantOp>(op.getLoc(), b.getIndexAttr(0));
 
-      offsetMap.insert({res, {res, res.getType(), defaultBitWidth, zero}});
+      offsetMap.insert({res, {res, res.getType(), zero}});
       workList.push(res);
     });
 
@@ -477,30 +385,13 @@ public:
                   auto prevOff = offsetInfo.offset;
                   auto off = addptr->getOperand(1);
 
-                  auto lhsWidth = offsetInfo.bitWidth;
-                  auto rhsWidth = getBitWidth(off.getType());
-                  auto resWidth = std::max(lhsWidth, rhsWidth);
-
-                  if (lhsWidth < resWidth) {
-                    prevOff = b.create<arith::ExtSIOp>(
-                        loc, getPtrOffsetType(offsetInfo.ptrType, resWidth),
-                        prevOff);
-                  }
-
-                  if (rhsWidth < resWidth) {
-                    off = b.create<arith::ExtSIOp>(
-                        loc, getPtrOffsetType(offsetInfo.ptrType, resWidth),
-                        off);
-                  }
-
-                  auto accumulatedOff = b.create<arith::AddIOp>(
-                      loc,
-                      getPtrOffsetType(addptr.getResult().getType(), resWidth),
-                      prevOff, off);
-
+                  Type offsetType = getPtrOffsetType(addptr.getType());
+                  off = castOffset(off, offsetType, loc, b);
+                  auto accumulatedOff =
+                      b.create<arith::AddIOp>(loc, offsetType, prevOff, off);
                   PtrOffset newOffsetInfo{offsetInfo.ptr,
                                           addptr.getResult().getType(),
-                                          resWidth, accumulatedOff};
+                                          accumulatedOff};
 
                   offsetMap.insert({addptr, newOffsetInfo});
                   workList.push(addptr);
@@ -524,15 +415,12 @@ public:
                   auto offsetInfo = offsetMap.at(ptr);
 
                   OpBuilder b{op};
-                  auto clone =
-                      b.create(op->getLoc(), op->getName().getIdentifier(),
-                               ValueRange{offsetInfo.offset},
-                               TypeRange{getPtrOffsetType(
-                                   resType, offsetInfo.bitWidth)});
-
+                  Operation *replacement = b.create(
+                      op->getLoc(), op->getName().getIdentifier(),
+                      ValueRange{offsetInfo.offset},
+                      TypeRange{getPtrOffsetType(resType)}, op->getAttrs());
                   PtrOffset newOffsetInfo{offsetInfo.ptr, resType,
-                                          offsetInfo.bitWidth,
-                                          clone->getResult(0)};
+                                          replacement->getResult(0)};
 
                   offsetMap.insert({
                       res,
@@ -566,12 +454,10 @@ public:
                     Value sourceAddress = b.create<triton::AddPtrOp>(
                         loc, offsetInfo.ptrType, sourceBase, offsetInfo.offset);
                     bitcast->setOperand(0, sourceAddress);
-                    Type zeroType =
-                        getPtrOffsetType(resType, offsetInfo.bitWidth);
+                    Type zeroType = getPtrOffsetType(resType);
                     Value zero = b.create<arith::ConstantOp>(
                         loc, b.getIntegerAttr(zeroType, 0));
-                    offsetMap.insert(
-                        {res, {res, resType, offsetInfo.bitWidth, zero}});
+                    offsetMap.insert({res, {res, resType, zero}});
                     workList.push(res);
                     return success();
                   }
@@ -580,9 +466,8 @@ public:
                     return failure();
                   }
 
-                  offsetMap.insert({res,
-                                    {offsetInfo.ptr, resType,
-                                     offsetInfo.bitWidth, offsetInfo.offset}});
+                  offsetMap.insert(
+                      {res, {offsetInfo.ptr, resType, offsetInfo.offset}});
                   workList.push(res);
                   toDelete.push_back(bitcast);
 
@@ -623,8 +508,7 @@ public:
 
                   auto offsetInfo = offsetMap.at(init);
 
-                  auto offsetType =
-                      getPtrOffsetType(offsetInfo.ptrType, offsetInfo.bitWidth);
+                  auto offsetType = getPtrOffsetType(offsetInfo.ptrType);
 
                   operandReplacements.push_back({forOp.getOperation(),
                                                  use.getOperandNumber(),
@@ -646,14 +530,13 @@ public:
                   // the init-arg is used in the op's body instead, we have to
                   // process uses of the iter-arg.
                   PtrOffset iterArgOffset{offsetInfo.ptr, offsetInfo.ptrType,
-                                          offsetInfo.bitWidth, iterArg};
+                                          iterArg};
                   offsetMap.insert({
                       iterArg,
                       iterArgOffset,
                   });
 
-                  PtrOffset resOffset{offsetInfo.ptr, offsetInfo.ptrType,
-                                      offsetInfo.bitWidth, res};
+                  PtrOffset resOffset{offsetInfo.ptr, offsetInfo.ptrType, res};
                   offsetMap.insert({
                       res,
                       resOffset,
@@ -671,8 +554,7 @@ public:
                   auto argIndex = use.getOperandNumber();
                   auto init = whileOp.getInits()[argIndex];
                   auto offsetInfo = offsetMap.at(init);
-                  auto offsetType =
-                      getPtrOffsetType(offsetInfo.ptrType, offsetInfo.bitWidth);
+                  auto offsetType = getPtrOffsetType(offsetInfo.ptrType);
 
                   operandReplacements.push_back(
                       {whileOp.getOperation(), argIndex, offsetInfo.offset});
@@ -680,21 +562,20 @@ public:
                   auto beforeArg = whileOp.getBeforeArguments()[argIndex];
                   beforeArg.setType(offsetType);
                   PtrOffset beforeArgOffset{offsetInfo.ptr, offsetInfo.ptrType,
-                                            offsetInfo.bitWidth, beforeArg};
+                                            beforeArg};
                   offsetMap.insert({beforeArg, beforeArgOffset});
                   workList.push(beforeArg);
 
                   auto afterArg = whileOp.getAfterArguments()[argIndex];
                   afterArg.setType(offsetType);
                   PtrOffset afterArgOffset{offsetInfo.ptr, offsetInfo.ptrType,
-                                           offsetInfo.bitWidth, afterArg};
+                                           afterArg};
                   offsetMap.insert({afterArg, afterArgOffset});
                   workList.push(afterArg);
 
                   auto res = whileOp.getResult(argIndex);
                   res.setType(offsetType);
-                  PtrOffset resOffset{offsetInfo.ptr, offsetInfo.ptrType,
-                                      offsetInfo.bitWidth, res};
+                  PtrOffset resOffset{offsetInfo.ptr, offsetInfo.ptrType, res};
                   offsetMap.insert({res, resOffset});
                   workList.push(res);
 
@@ -828,24 +709,18 @@ public:
                         makeGatherScatter.getGatherScatterOffset();
                     auto gatherOffsetType =
                         cast<RankedTensorType>(gatherOffset.getType());
-                    unsigned targetWidth = std::max(
-                        offsetInfo.bitWidth,
-                        cast<IntegerType>(gatherOffsetType.getElementType())
-                            .getWidth());
                     Type targetOffsetType = RankedTensorType::get(
-                        gatherOffsetType.getShape(),
-                        IntegerType::get(&getContext(), targetWidth),
-                        gatherOffsetType.getEncoding());
+                        gatherOffsetType.getShape(), b.getIndexType());
 
                     gatherOffset =
                         castOffset(gatherOffset, targetOffsetType, loc, b);
-                    Value baseOffset = castOrSplatOffset(
-                        offsetInfo.offset, targetOffsetType, loc, b);
+                    Value baseOffset = b.create<triton::SplatOp>(
+                        loc, targetOffsetType, offsetInfo.offset);
                     Value accumulatedOffset = b.create<arith::AddIOp>(
                         loc, targetOffsetType, baseOffset, gatherOffset);
-
                     makeGatherScatter->setOperand(0, ptr);
-                    makeGatherScatter->setOperand(1, accumulatedOffset);
+                    makeGatherScatter.getGatherScatterOffsetMutable().assign(
+                        accumulatedOffset);
                     return success();
                   })
               .Case<tts::MakeTensorPtrOp>([&](auto makeTensorPtr) {
@@ -858,38 +733,10 @@ public:
                 Value ptr = materializeBasePtr(offsetInfo, loc, b);
                 makeTensorPtr->setOperand(0, ptr);
 
-                // Add the existing offset from the base to the offset
-                // operand in the ops.
-                auto &offsetOpnd = makeTensorPtr.getOffsetsMutable()[0];
-                auto currOffset = offsetOpnd.get();
-
-                auto baseOffType = baseOffset.getType();
-                auto currOffType = currOffset.getType();
-
-                if (baseOffType != currOffType) {
-                  if (currOffType.isIndex()) {
-                    baseOffset = b.create<arith::IndexCastOp>(
-                        loc, b.getIndexType(), baseOffset);
-                  } else if (currOffType.isInteger()) {
-                    if (baseOffType.getIntOrFloatBitWidth() <
-                        currOffType.getIntOrFloatBitWidth()) {
-                      baseOffset = b.create<arith::ExtSIOp>(loc, currOffType,
-                                                            baseOffset);
-                    } else {
-                      // MakeTensorPtrOp only takes i32 offsets, so we need
-                      // to truncate if the offsets were already in i64
-                      makeTensorPtr.emitWarning(
-                          "truncating offsets which may result in data loss");
-                      baseOffset = b.create<arith::TruncIOp>(loc, currOffType,
-                                                             baseOffset);
-                    }
-                  }
-                }
-
-                auto accumulatedOffset = b.create<arith::AddIOp>(
-                    loc, currOffset.getType(), baseOffset, currOffset);
-
-                offsetOpnd.set(accumulatedOffset);
+                auto &offsetOperand = makeTensorPtr.getOffsetsMutable()[0];
+                Value accumulatedOffset = b.create<arith::AddIOp>(
+                    loc, baseOffset, offsetOperand.get());
+                offsetOperand.set(accumulatedOffset);
 
                 return success();
               })
@@ -915,7 +762,7 @@ public:
 
   void runOnOperation() override {
     OwningOpRef<ModuleOp> transformedModule(getOperation().clone());
-    if (failed(processUnstructuredPtrs(*transformedModule, offsetBitWidth))) {
+    if (failed(processUnstructuredPtrs(*transformedModule))) {
       getOperation()->emitWarning(
           "Cannot transform tensor of pointers into a single base pointer "
           "with tensor of offsets");

@@ -179,7 +179,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                         buddy_opt_path,
                         ttshared_path,
                         *_set_llvm_target_args(options),
-                    *_remarks_args(),
+                        *_remarks_args(),
                         *ime_lowering_passes,
                         "--mlir-print-debuginfo",
                         "-o",
