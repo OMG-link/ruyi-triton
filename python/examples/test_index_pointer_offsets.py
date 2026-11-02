@@ -7,9 +7,11 @@ import pytest
 from triton.backends.triton_shared import compiler
 
 
-def options(triple):
-    return compiler.CPUOptions(target_triple=triple, target_cpu="generic",
-                               target_features="", riscv_vlen=0)
+def native_options():
+    """The host target as the driver resolves it, so the object links."""
+    args = {}
+    compiler._resolve_target(args)
+    return compiler.CPUOptions(**args)
 
 
 def compile_ir(ttir, target):
@@ -21,7 +23,7 @@ def test_index_shape_ops_native(tmp_path):
     triple = compiler._host_triple()
     if not triple:
         pytest.skip("native target unavailable")
-    target = options(triple)
+    target = native_options()
     ttir = """module {
       tt.func public @shape_ops(%base: !tt.ptr<f32>, %out: !tt.ptr<f32>, %offset: index) {
         %splat = tt.splat %offset : index -> tensor<2xindex>

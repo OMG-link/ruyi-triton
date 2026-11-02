@@ -12,17 +12,32 @@ from triton.compiler.errors import CompilationError
 from test_utils import get_llvm_bin_path
 
 
+def _tile():
+    """Elements of an f32 tile that fills the smallest register group.
+
+    The smallest e32 group on RISC-V is LMUL = 1/2 (ELEN 64), VLEN / 64 f32
+    elements; on other hosts four f32 fill one 128-bit register.
+    """
+    from triton._C.libtriton import triton_shared
+
+    vlen = triton_shared.read_host_vlen()
+    return max(4, vlen // 64)
+
+
+N = _tile()
+
+
 @triton.jit
-def _single_barrier_kernel(x_ptr, out_ptr, MEMORY: tl.constexpr):
-    offs = tl.arange(0, 4)
+def _single_barrier_kernel(x_ptr, out_ptr, MEMORY: tl.constexpr, N: tl.constexpr):
+    offs = tl.arange(0, N)
     x = tl.load(x_ptr + offs)
     x = tl.sched_barrier(x, memory=MEMORY)
     tl.store(out_ptr + offs, x * 2.0)
 
 
 @triton.jit
-def _multiple_barrier_kernel(a_ptr, b_ptr, out_ptr):
-    offs = tl.arange(0, 4)
+def _multiple_barrier_kernel(a_ptr, b_ptr, out_ptr, N: tl.constexpr):
+    offs = tl.arange(0, N)
     a = tl.load(a_ptr + offs)
     b = tl.load(b_ptr + offs)
     a, b = tl.sched_barrier(a, b)
@@ -52,25 +67,25 @@ def _ragged_barrier_kernel(x_ptr, out_ptr):
 
 
 def test_sched_barrier_single_tensor(device):
-    x = torch.randn(4, device=device)
+    x = torch.randn(N, device=device)
     out = torch.empty_like(x)
-    _single_barrier_kernel[(1,)](x, out, MEMORY=False)
+    _single_barrier_kernel[(1,)](x, out, MEMORY=False, N=N)
     torch.testing.assert_close(out, x * 2.0)
 
 
 def test_sched_barrier_multiple_tensors(device):
-    a = torch.randn(4, device=device)
-    b = torch.randn(4, device=device)
+    a = torch.randn(N, device=device)
+    b = torch.randn(N, device=device)
     out = torch.empty_like(a)
-    _multiple_barrier_kernel[(1,)](a, b, out)
+    _multiple_barrier_kernel[(1,)](a, b, out, N=N)
     torch.testing.assert_close(out, a + b)
 
 
 @pytest.mark.parametrize("memory", [False, True])
 def test_sched_barrier_emits_sideeffect_asm(device, memory):
-    x = torch.randn(4, device=device)
+    x = torch.randn(N, device=device)
     out = torch.empty_like(x)
-    compiled = _single_barrier_kernel.warmup(x, out, MEMORY=memory, grid=(1,))
+    compiled = _single_barrier_kernel.warmup(x, out, MEMORY=memory, N=N, grid=(1,))
     llir = compiled.asm["llir"]
     assert "asm sideeffect" in llir
     assert ("~{memory}" in llir) is memory
