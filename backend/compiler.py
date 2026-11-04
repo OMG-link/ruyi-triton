@@ -546,7 +546,7 @@ def _tile_to_vector_args(options, ime=False) -> list:
         return []
     if ime:
         return [
-            "--convert-tile-tensor-to-vector=contract-ime-tiles=true",
+            "--convert-tile-tensor-to-vector=allow-ime-tile-contracts=true",
             "--canonicalize",
             "--cse",
             "--lower-vector-contract-to-ime-tile",
