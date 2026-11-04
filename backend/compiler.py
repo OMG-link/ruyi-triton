@@ -145,7 +145,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                 "--lower-linalg-to-ime",
                 # Lower IME dialect → vector / loop ops
                 "--lower-ime=target="
-                + ("k3" if _ime_generation(options) == "a100" else "generic"),
+                + ("a100" if _ime_extension(options) == "xsmtvdotii" else "generic"),
                 # Lower any remaining linalg / affine / SCF ops
                 "--convert-linalg-to-loops",
                 "--lower-affine",
@@ -490,25 +490,25 @@ def _target_has_extension(triple: str, cpu: str, features: str, ext: str) -> boo
     return re.search(rf"(^|[_,: ]){re.escape(ext)}(\d|,|$|_| )", facts) is not None
 
 
-def _ime_generation(options):
-    """The SpacemiT IME generation of the target: "k1", "a100" or None.
+def _ime_extension(options):
+    """The SpacemiT dot extension of the target: "xsmtvdotii", "xsmtvdot" or None.
 
-    The K1 has XSMTVDot (VLEN 256); the A100 cores of the K3 have XSMTVDotII
-    (VLEN 1024). The two share the dot intrinsics but not the tile shapes.
+    XSMTVDotII (the A100 cores of the K3) is a superset of the dot forms the
+    pipeline uses from XSMTVDot (the K1); the tile shapes follow from the
+    extension and the exact VLEN, which the buddy passes read themselves.
     """
     target = _target(options)
     if target is None or not target[0].startswith("riscv"):
         return None
-    if _target_has_extension(*target, "xsmtvdotii"):
-        return "a100"
-    if _target_has_extension(*target, "xsmtvdot"):
-        return "k1"
+    for ext in ("xsmtvdotii", "xsmtvdot"):
+        if _target_has_extension(*target, ext):
+            return ext
     return None
 
 
 def _check_ime_target(options) -> None:
     """The IME pipeline lowers matmuls to the SpacemiT dot extensions."""
-    if _ime_generation(options) is None:
+    if _ime_extension(options) is None:
         raise ValueError(
             "TRITON_RISCV_USE_IME=1 needs a RISC-V target with XSMTVDot or "
             f"XSMTVDotII, but the target is {_target(options)}. Run on an IME "
