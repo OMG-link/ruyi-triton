@@ -144,7 +144,8 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                 # Lower linalg.matmul (memref) → ime.vfmadot / ime.vmadot
                 "--lower-linalg-to-ime",
                 # Lower IME dialect → vector / loop ops
-                "--lower-ime",
+                "--lower-ime=target="
+                + ("k3" if _ime_generation(options) == "a100" else "generic"),
                 # Lower any remaining linalg / affine / SCF ops
                 "--convert-linalg-to-loops",
                 "--lower-affine",
@@ -489,17 +490,30 @@ def _target_has_extension(triple: str, cpu: str, features: str, ext: str) -> boo
     return re.search(rf"(^|[_,: ]){re.escape(ext)}(\d|,|$|_| )", facts) is not None
 
 
-def _check_ime_target(options) -> None:
-    """The IME pipeline lowers matmuls to XSMTVDot; the target must have it."""
+def _ime_generation(options):
+    """The SpacemiT IME generation of the target: "k1", "a100" or None.
+
+    The K1 has XSMTVDot (VLEN 256); the A100 cores of the K3 have XSMTVDotII
+    (VLEN 1024). The two share the dot intrinsics but not the tile shapes.
+    """
     target = _target(options)
-    if target is None or not target[0].startswith("riscv") or not (
-        _target_has_extension(*target, "xsmtvdot")
-    ):
+    if target is None or not target[0].startswith("riscv"):
+        return None
+    if _target_has_extension(*target, "xsmtvdotii"):
+        return "a100"
+    if _target_has_extension(*target, "xsmtvdot"):
+        return "k1"
+    return None
+
+
+def _check_ime_target(options) -> None:
+    """The IME pipeline lowers matmuls to the SpacemiT dot extensions."""
+    if _ime_generation(options) is None:
         raise ValueError(
-            "TRITON_RISCV_USE_IME=1 needs a RISC-V target with XSMTVDot, but the "
-            f"target is {target}. Set TRITON_RISCV_MCPU=spacemit-x60 (or add "
-            "+xsmtvdot to TRITON_RISCV_LLC_FEATURES) when not compiling on the "
-            "SpacemiT K1 itself."
+            "TRITON_RISCV_USE_IME=1 needs a RISC-V target with XSMTVDot or "
+            f"XSMTVDotII, but the target is {_target(options)}. Run on an IME "
+            "core (a SpacemiT K1, or an A100 core of the K3), or set "
+            "TRITON_RISCV_MCPU=spacemit-x60 / spacemit-a100."
         )
 
 
@@ -520,7 +534,8 @@ def _tile_to_vector_args(options, ime=False) -> list:
     same shape, sized from the #llvm.target attribute, so it runs whenever a
     target is attached (RISC-V and x86). `--flatten-vector-tiles` then maps
     the n-D vectors and their transfers onto 1-D registers. The IME pipeline
-    also converts K1-sized matmul(A, transpose(B)) into vector.contract, which
+    also converts matmul(A, transpose(B)) of the target's IME tile shapes
+    into vector.contract, which
     `--lower-vector-contract-to-ime-tile` turns into vmadot tile dots that its
     `--lower-ime` lowers. `--lower-cpu-sched-barrier` lowers `cpu.sched_barrier` to inline asm that
     holds its values in registers.
@@ -531,7 +546,7 @@ def _tile_to_vector_args(options, ime=False) -> list:
         return []
     if ime:
         return [
-            "--convert-tile-tensor-to-vector=contract-k1-tiles=true",
+            "--convert-tile-tensor-to-vector=contract-ime-tiles=true",
             "--canonicalize",
             "--cse",
             "--lower-vector-contract-to-ime-tile",
