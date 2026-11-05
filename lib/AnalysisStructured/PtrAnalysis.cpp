@@ -1207,8 +1207,8 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
         return visitOperandBitcast(castOp, state, loc, builder);
       } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(op)) {
         return visitOperandIntToPtr(intToPtrOp, state, loc, builder);
-      } else if (isa<triton::AllocScratchOp>(op)) {
-        // A per-program scratch buffer is a base pointer, like a pointer
+      } else if (isa<triton::AllocOp>(op)) {
+        // A per-program buffer is a base pointer, like a pointer
         // argument.
         state.source = operand;
         return success();

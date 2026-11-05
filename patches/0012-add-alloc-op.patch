@@ -1,16 +1,38 @@
+diff --git a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
+index 5a76a1d7b1..dfe18d2b78 100644
+--- a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
++++ b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
+@@ -18,6 +18,17 @@ def TT_CacheModifierAttr : I32EnumAttr<
+     let cppNamespace = "::mlir::triton";
+ }
+ 
++// Where tt.alloc places its buffer.
++def TT_AllocPlacementAttr : I32EnumAttr<
++    "AllocPlacement", "",
++    [
++        I32EnumAttrCase<"GLOBAL", 1, "global">,
++        I32EnumAttrCase<"LOCAL", 2, "local">,
++        I32EnumAttrCase<"SPM", 3, "spm">,
++    ]> {
++    let cppNamespace = "::mlir::triton";
++}
++
+ def TT_MemSemanticAttr : I32EnumAttr<
+     "MemSemantic", "",
+     [
 diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
-index 615286a7c5..66aafefe84 100644
+index 615286a7c5..fca83e33de 100644
 --- a/include/triton/Dialect/Triton/IR/TritonOps.td
 +++ b/include/triton/Dialect/Triton/IR/TritonOps.td
-@@ -625,6 +625,47 @@ def TT_GetNumProgramsOp : TT_Op<"get_num_programs", [Pure]> {
+@@ -625,6 +625,58 @@ def TT_GetNumProgramsOp : TT_Op<"get_num_programs", [Pure]> {
      }];
  }
  
 +//
-+// Per-program scratch allocation
++// Per-program buffer allocation
 +//
-+def TT_AllocScratchOp : TT_Op<"alloc_scratch"> {
-+    let summary = "allocate a scratch buffer private to the program instance";
++def TT_AllocOp : TT_Op<"alloc"> {
++    let summary = "allocate a buffer private to the program instance";
 +    let description = [{
 +      Allocates `num_elements` contiguous elements of the result's pointee
 +      type and returns a pointer to the first element, aligned to at least
@@ -29,18 +51,29 @@ index 615286a7c5..66aafefe84 100644
 +        instances share it, and the pointer must not be passed to another
 +        program instance.
 +
-+      Placement is up to the backend. On CPU the buffer lives on the heap.
-+      On GPU it would live in global memory, carved per program instance
-+      from a buffer provided by the runtime at launch.
++      `placement` chooses the memory the buffer lives in:
++
++      - `global` (default): ordinary memory, the heap on CPU. On GPU it would
++        be global memory, carved per program instance from a buffer provided
++        by the runtime at launch.
++      - `local`: memory local to the program instance, its stack frame on
++        CPU.
++      - `spm`: scratchpad memory, the software-managed on-chip memory some
++        targets have (TCM, local data memory).
++
++      A backend that cannot place the buffer as requested rejects the op
++      rather than falling back to another placement.
 +
 +      Example:
 +
 +      ```mlir
-+      %buf = tt.alloc_scratch {alignment = 64 : i32, num_elements = 256 : i64} : !tt.ptr<f32>
++      %buf = tt.alloc {alignment = 64 : i32, num_elements = 256 : i64} : !tt.ptr<f32>
 +      ```
 +    }];
 +
-+    let arguments = (ins I64Attr:$num_elements, I32Attr:$alignment);
++    let arguments = (ins I64Attr:$num_elements, I32Attr:$alignment,
++                         DefaultValuedAttr<TT_AllocPlacementAttr,
++                             "::mlir::triton::AllocPlacement::GLOBAL">:$placement);
 +    let results = (outs Arg<TT_Ptr, "", [MemAlloc<GlobalMemory>]>:$result);
 +
 +    let assemblyFormat = "attr-dict `:` qualified(type($result))";
@@ -51,15 +84,15 @@ index 615286a7c5..66aafefe84 100644
  // Dot Op
  //
 diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
-index 75ee5ed439..d6d9a69b83 100644
+index 75ee5ed439..be58363916 100644
 --- a/lib/Dialect/Triton/IR/Ops.cpp
 +++ b/lib/Dialect/Triton/IR/Ops.cpp
 @@ -189,6 +189,22 @@ OpFoldResult TransOp::fold(FoldAdaptor adaptor) {
    return {};
  }
  
-+//-- AllocScratchOp --
-+LogicalResult AllocScratchOp::verify() {
++//-- AllocOp --
++LogicalResult AllocOp::verify() {
 +  if (static_cast<int64_t>(getNumElements()) <= 0)
 +    return emitOpError("num_elements must be positive");
 +  uint32_t alignment = getAlignment();
@@ -78,32 +111,47 @@ index 75ee5ed439..d6d9a69b83 100644
    auto order = getOrder();
    auto srcTy = cast<RankedTensorType>(getSrc().getType());
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 58592bf888..5178130f63 100644
+index 58592bf888..949048a617 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
-@@ -1674,6 +1674,13 @@ void init_triton_ir(py::module &&m) {
+@@ -242,6 +242,12 @@ void init_triton_ir(py::module &&m) {
+       .value("PAD_NAN", PaddingOption::PAD_NAN)
+       .export_values();
+ 
++  py::enum_<AllocPlacement>(m, "ALLOC_PLACEMENT", py::module_local())
++      .value("GLOBAL", AllocPlacement::GLOBAL)
++      .value("LOCAL", AllocPlacement::LOCAL)
++      .value("SPM", AllocPlacement::SPM)
++      .export_values();
++
+   py::enum_<CacheModifier>(m, "CACHE_MODIFIER", py::module_local())
+       .value("NONE", CacheModifier::NONE)
+       .value("CA", CacheModifier::CA)
+@@ -1674,6 +1680,15 @@ void init_triton_ir(py::module &&m) {
                 throw pybind11::index_error("program_id must be in [0,3]");
               return self.create<GetProgramIdOp>(axis);
             })
-+      .def("create_alloc_scratch",
++      .def("create_alloc",
 +           [](TritonOpBuilder &self, Type &ptrType, int64_t numElements,
-+              int32_t alignment) -> Value {
-+             return self.create<AllocScratchOp>(
++              int32_t alignment, AllocPlacement placement) -> Value {
++             return self.create<AllocOp>(
 +                 ptrType, self.getBuilder().getI64IntegerAttr(numElements),
-+                 self.getBuilder().getI32IntegerAttr(alignment));
++                 self.getBuilder().getI32IntegerAttr(alignment),
++                 AllocPlacementAttr::get(self.getBuilder().getContext(),
++                                         placement));
 +           })
        .def("create_get_num_programs",
             [](TritonOpBuilder &self, int axis) -> Value {
               if (axis < 0 || axis > 3)
 diff --git a/python/triton/language/__init__.py b/python/triton/language/__init__.py
-index 5a521899ee..6ad4c166ea 100644
+index 5a521899ee..63c59b7711 100644
 --- a/python/triton/language/__init__.py
 +++ b/python/triton/language/__init__.py
 @@ -30,6 +30,7 @@ from .standard import (
  )
  from .core import (
      PropagateNan,
-+    alloc_scratch,
++    alloc,
      TRITON_MAX_TENSOR_NUMEL,
      aggregate_replace,
      load_tensor_descriptor,
@@ -111,23 +159,23 @@ index 5a521899ee..6ad4c166ea 100644
  from . import target_info
  
  __all__ = [
-+    "alloc_scratch",
++    "alloc",
      "PropagateNan",
      "TRITON_MAX_TENSOR_NUMEL",
      "load_tensor_descriptor",
 diff --git a/python/triton/language/core.py b/python/triton/language/core.py
-index 50d2af2d79..89f4f49e37 100644
+index 50d2af2d79..b068f8270f 100644
 --- a/python/triton/language/core.py
 +++ b/python/triton/language/core.py
-@@ -1970,6 +1970,44 @@ def num_programs(axis, _semantic=None):
+@@ -1970,6 +1970,53 @@ def num_programs(axis, _semantic=None):
      return _semantic.num_programs(axis)
  
  
 +@builtin
-+def alloc_scratch(shape, dtype, alignment=None, _semantic=None):
++def alloc(shape, dtype, alignment=None, placement="global", _semantic=None):
 +    """
-+    Allocates a scratch buffer private to the current program instance and
-+    returns a pointer to its first element.
++    Allocates a buffer private to the current program instance and returns a
++    pointer to its first element.
 +
 +    The buffer holds :code:`prod(shape)` contiguous elements of :code:`dtype`
 +    in row-major order and is accessed with ordinary :code:`tl.load` and
@@ -139,8 +187,14 @@ index 50d2af2d79..89f4f49e37 100644
 +    - Its contents are uninitialized.
 +    - It is private to the program instance and never shared with another one.
 +
-+    On CPU the buffer lives on the heap. On GPU it would live in global
-+    memory, carved per program instance from a buffer provided by the runtime.
++    :code:`placement` chooses the memory the buffer lives in:
++    :code:`"global"` (the default; ordinary memory, the heap on CPU, and on
++    GPU global memory carved per program instance from a buffer provided by
++    the runtime), :code:`"local"` (memory local to the program instance, its
++    stack frame on CPU) or :code:`"spm"` (scratchpad memory, the
++    software-managed on-chip memory some targets have, such as TCM). A
++    backend that cannot honour the placement rejects the kernel instead of
++    falling back to another one.
 +
 +    :param shape: Number of elements, or a list of constant dimensions.
 +    :type shape: int or tuple of ints
@@ -149,6 +203,8 @@ index 50d2af2d79..89f4f49e37 100644
 +    :param alignment: Minimum alignment in bytes, a power of two. Defaults to
 +        64, or the element size if larger.
 +    :type alignment: int, optional
++    :param placement: :code:`"global"`, :code:`"local"` or :code:`"spm"`.
++    :type placement: str, optional
 +    :rtype: pointer to :code:`dtype`
 +    """
 +    shape = _unwrap_if_constexpr(shape)
@@ -158,37 +214,46 @@ index 50d2af2d79..89f4f49e37 100644
 +        shape = [_unwrap_if_constexpr(d) for d in shape]
 +    dtype = _unwrap_if_constexpr(dtype)
 +    alignment = _unwrap_if_constexpr(alignment)
-+    return _semantic.alloc_scratch(shape, dtype, alignment)
++    placement = _unwrap_if_constexpr(placement)
++    return _semantic.alloc(shape, dtype, alignment, placement)
 +
 +
  # -----------------------
  # Block Initialization
  # -----------------------
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 1f12927ca4..4e9dbdf83b 100644
+index 1f12927ca4..46b7a6b39d 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
-@@ -46,6 +46,24 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -46,6 +46,32 @@ class TritonSemantic(Generic[TensorTy]):
              raise ValueError(f"num_programs axis must be 0, 1, or 2 but got {axis}")
          return self.tensor(self.builder.create_get_num_programs(axis), tl.int32)
  
-+    def alloc_scratch(self, shape, dtype: tl.dtype, alignment) -> TensorTy:
++    def alloc(self, shape, dtype: tl.dtype, alignment, placement) -> TensorTy:
 +        if isinstance(shape, int):
 +            shape = [shape]
 +        numel = 1
 +        for d in shape:
 +            if not isinstance(d, int) or d <= 0:
-+                raise ValueError(f"alloc_scratch shape must contain positive constant integers, got {shape}")
++                raise ValueError(f"alloc shape must contain positive constant integers, got {shape}")
 +            numel *= d
 +        if not isinstance(dtype, tl.dtype) or dtype.is_ptr() or not (dtype.is_int() or dtype.is_floating()):
-+            raise ValueError(f"alloc_scratch dtype must be a scalar integer or float type, got {dtype}")
++            raise ValueError(f"alloc dtype must be a scalar integer or float type, got {dtype}")
 +        if alignment is None:
 +            alignment = max(64, dtype.primitive_bitwidth // 8)
 +        if not isinstance(alignment, int) or alignment <= 0 or alignment & (alignment - 1):
-+            raise ValueError(f"alloc_scratch alignment must be a positive power of two, got {alignment}")
++            raise ValueError(f"alloc alignment must be a positive power of two, got {alignment}")
++        placements = {
++            "global": ir.ALLOC_PLACEMENT.GLOBAL,
++            "local": ir.ALLOC_PLACEMENT.LOCAL,
++            "spm": ir.ALLOC_PLACEMENT.SPM,
++        }
++        if placement not in placements:
++            raise ValueError(f"alloc placement must be 'global', 'local' or 'spm', got {placement!r}")
 +        ptr_ty = tl.pointer_type(dtype)
 +        return self.tensor(
-+            self.builder.create_alloc_scratch(ptr_ty.to_ir(self.builder), numel, alignment), ptr_ty)
++            self.builder.create_alloc(ptr_ty.to_ir(self.builder), numel, alignment, placements[placement]),
++            ptr_ty)
 +
  # ===----------------------------------------------------------------------===//
  #                               Implicit Casting Utilities

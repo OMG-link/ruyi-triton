@@ -89,7 +89,9 @@ public:
   }
 };
 
-// Lower each tt.alloc_scratch to a heap memref.alloc and hand it to its users
+// Lower each tt.alloc to the allocation its placement names, a heap
+// memref.alloc for `global` or a stack memref.alloca for `local`, and hand it
+// to its users
 // the way a pointer argument is handed to them: as a memref<*xT> cast back to
 // the original !tt.ptr<T>. The loads and stores already lowered by
 // StructuredToMemref and UnstructuredToMemref cast their base pointer to
@@ -100,23 +102,41 @@ public:
 // the ownership-based --buffer-deallocation-pipeline, which rejects input that
 // already contains deallocations; it frees the buffer at the end of the
 // function, which is the end of the program instance.
-static void lowerAllocScratch(ModuleOp moduleOp) {
-  moduleOp.walk([](triton::AllocScratchOp op) {
+//
+// `spm` (scratchpad memory, such as TCM) has no lowering yet and is reported
+// as an error rather than placed elsewhere.
+static LogicalResult lowerAlloc(ModuleOp moduleOp) {
+  WalkResult result = moduleOp.walk([](triton::AllocOp op) {
     OpBuilder b(op);
     Location loc = op.getLoc();
     auto ptrType = cast<triton::PointerType>(op.getType());
     Type elementType = ptrType.getPointeeType();
     auto memrefType = MemRefType::get(
         {static_cast<int64_t>(op.getNumElements())}, elementType);
-    Value alloc = b.create<memref::AllocOp>(
-        loc, memrefType, b.getI64IntegerAttr(op.getAlignment()));
+    IntegerAttr alignment = b.getI64IntegerAttr(op.getAlignment());
+    Value alloc;
+    switch (op.getPlacement()) {
+    case triton::AllocPlacement::GLOBAL:
+      alloc = b.create<memref::AllocOp>(loc, memrefType, alignment);
+      break;
+    case triton::AllocPlacement::LOCAL:
+      // The op sits directly in the function body, so the stack slot lives
+      // as long as the program instance.
+      alloc = b.create<memref::AllocaOp>(loc, memrefType, alignment);
+      break;
+    case triton::AllocPlacement::SPM:
+      op.emitError("tt.alloc placement 'spm' is not implemented yet");
+      return WalkResult::interrupt();
+    }
     Value unranked = b.create<memref::CastOp>(
         loc, UnrankedMemRefType::get(elementType, /*memorySpace=*/0), alloc);
     Value ptr = b.create<UnrealizedConversionCastOp>(loc, ptrType, unranked)
                     .getResult(0);
     op.replaceAllUsesWith(ptr);
     op.erase();
+    return WalkResult::advance();
   });
+  return failure(result.wasInterrupted());
 }
 
 class TritonPtrToMemrefPass
@@ -174,7 +194,8 @@ public:
       signalPassFailure();
     }
 
-    lowerAllocScratch(moduleOp);
+    if (failed(lowerAlloc(moduleOp)))
+      return signalPassFailure();
 
     PassManager pm(&getContext(), moduleOp.getOperationName());
     pm.addPass(createCanonicalizerPass());

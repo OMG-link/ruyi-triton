@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 import torch
 
@@ -10,7 +12,7 @@ def _stage_chunks_kernel(x_ptr, out_ptr, NCHUNK: tl.constexpr, BLOCK: tl.constex
     # Each program copies its NCHUNK x BLOCK row into scratch chunk by chunk,
     # then reads the chunks back in reverse order.
     pid = tl.program_id(0)
-    buf = tl.alloc_scratch(NCHUNK * BLOCK, tl.float32)
+    buf = tl.alloc(NCHUNK * BLOCK, tl.float32)
     offs = tl.arange(0, BLOCK)
     row = pid * NCHUNK * BLOCK
     for i in range(NCHUNK):
@@ -34,7 +36,7 @@ def _scratch_accumulator_kernel(x_ptr, out_ptr, K, M: tl.constexpr, N: tl.conste
     # A 2-D accumulator lives in scratch across loop iterations: each
     # iteration loads it, adds one input tile and stores it back.
     pid = tl.program_id(0)
-    acc = tl.alloc_scratch((M, N), tl.float32)
+    acc = tl.alloc((M, N), tl.float32)
     om = tl.arange(0, M)[:, None]
     on = tl.arange(0, N)[None, :]
     tl.store(acc + om * N + on, tl.zeros((M, N), tl.float32))
@@ -62,7 +64,7 @@ def _scratch_int_kernel(x_ptr, out_ptr, BLOCK: tl.constexpr):
     # Integer scratch with an explicit alignment, written at a program-dependent
     # offset inside the buffer.
     pid = tl.program_id(0)
-    buf = tl.alloc_scratch(4 * BLOCK, tl.int32, alignment=128)
+    buf = tl.alloc(4 * BLOCK, tl.int32, alignment=128)
     offs = tl.arange(0, BLOCK)
     x = tl.load(x_ptr + pid * BLOCK + offs)
     slot = pid % 4
@@ -78,3 +80,37 @@ def test_scratch_int(device):
     _scratch_int_kernel[(nprog,)](x, out, BLOCK=block)
     ref = x + torch.arange(nprog, dtype=torch.int32)[:, None]
     torch.testing.assert_close(out, ref)
+
+
+@triton.jit
+def _alloc_placement_kernel(x_ptr, out_ptr, BLOCK: tl.constexpr, PLACEMENT: tl.constexpr):
+    # A round trip through scratch at the requested placement.
+    pid = tl.program_id(0)
+    buf = tl.alloc(BLOCK, tl.float32, placement=PLACEMENT)
+    offs = tl.arange(0, BLOCK)
+    tl.store(buf + offs, tl.load(x_ptr + pid * BLOCK + offs) + 1.0)
+    tl.store(out_ptr + pid * BLOCK + offs, tl.load(buf + offs))
+
+
+@pytest.mark.parametrize("placement", ["global", "local"])
+def test_alloc_placement(device, placement):
+    nprog, block = 3, 64
+    x = torch.randn(nprog, block, device=device, dtype=torch.float32)
+    out = torch.empty_like(x)
+    _alloc_placement_kernel[(nprog,)](x, out, BLOCK=block, PLACEMENT=placement)
+    torch.testing.assert_close(out, x + 1.0)
+
+
+def test_alloc_placement_spm_unimplemented(device):
+    x = torch.randn(1, 64, device=device, dtype=torch.float32)
+    out = torch.empty_like(x)
+    # triton-shared-opt reports "placement 'spm' is not implemented yet".
+    with pytest.raises(subprocess.CalledProcessError):
+        _alloc_placement_kernel[(1,)](x, out, BLOCK=64, PLACEMENT="spm")
+
+
+def test_alloc_placement_invalid(device):
+    x = torch.randn(1, 64, device=device, dtype=torch.float32)
+    out = torch.empty_like(x)
+    with pytest.raises(Exception, match="placement must be 'global', 'local' or 'spm'"):
+        _alloc_placement_kernel[(1,)](x, out, BLOCK=64, PLACEMENT="heap")

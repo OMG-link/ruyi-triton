@@ -1,19 +1,19 @@
 // RUN: triton-shared-opt --triton-to-linalg-experimental %s | FileCheck %s
 // RUN: triton-shared-opt --triton-to-linalg-experimental %s | mlir-opt --one-shot-bufferize --buffer-deallocation-pipeline | FileCheck %s --check-prefix=DEALLOC
 //
-// tt.alloc_scratch becomes a heap memref.alloc, and loads and stores through
+// tt.alloc with the default placement becomes a heap memref.alloc, and loads and stores through
 // the returned pointer become structured memref accesses on that allocation,
 // the same as through a pointer argument. The ownership-based deallocation
 // pipeline frees the allocation before the function returns.
 
 module {
-  // CHECK-LABEL: func.func @scratch_roundtrip
-  // DEALLOC-LABEL: func.func @scratch_roundtrip
-  tt.func public @scratch_roundtrip(%in: !tt.ptr<f32>, %out: !tt.ptr<f32>, %off: i32) {
+  // CHECK-LABEL: func.func @alloc_roundtrip
+  // DEALLOC-LABEL: func.func @alloc_roundtrip
+  tt.func public @alloc_roundtrip(%in: !tt.ptr<f32>, %out: !tt.ptr<f32>, %off: i32) {
     // CHECK: %[[ALLOC:.+]] = memref.alloc() alignment = 64 : memref<256xf32>
-    // CHECK-NOT: tt.alloc_scratch
+    // CHECK-NOT: tt.alloc
     // CHECK-NOT: unrealized_conversion_cast
-    %buf = tt.alloc_scratch {alignment = 64 : i32, num_elements = 256 : i64} : !tt.ptr<f32>
+    %buf = tt.alloc {alignment = 64 : i32, num_elements = 256 : i64} : !tt.ptr<f32>
     %range = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
     %in_s = tt.splat %in : !tt.ptr<f32> -> tensor<64x!tt.ptr<f32>>
     %in_p = tt.addptr %in_s, %range : tensor<64x!tt.ptr<f32>>, tensor<64xi32>

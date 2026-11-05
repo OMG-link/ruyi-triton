@@ -305,8 +305,8 @@ public:
       }
     });
 
-    // A per-program scratch buffer is a source pointer, like an argument.
-    root.walk([&](triton::AllocScratchOp op) {
+    // A per-program buffer is a source pointer, like an argument.
+    root.walk([&](triton::AllocOp op) {
       auto res = op.getResult();
       OpBuilder b(op);
       Value zero = b.create<arith::ConstantOp>(op.getLoc(), b.getIndexAttr(0));
