@@ -323,7 +323,11 @@ _HOST_TRIPLES = {
 
 @functools.lru_cache()
 def _get_host_cpu() -> str:
-    """LLVM's name for the host CPU, e.g. spacemit-x60 on the SpacemiT K1."""
+    """LLVM's name for the host CPU, e.g. spacemit-x60 on the SpacemiT K1.
+
+    LLVM has one name, spacemit-x60, for both K1 core types: the A60 cores
+    0-3, which have the IME and TCM, and the X60 cores 4-7, which do not.
+    """
     output = subprocess.check_output(
         [_get_llvm_bin_path("llc"), "--version"], text=True
     )
