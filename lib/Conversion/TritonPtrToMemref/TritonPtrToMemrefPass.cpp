@@ -26,6 +26,8 @@
 #include "triton-shared/AnalysisStructured/PtrAnalysis.h"
 #include "triton-shared/Conversion/TritonPtrToMemref/TritonPtrToMemref.h"
 #include "triton-shared/Dialect/TritonStructured/IR/TritonStructuredDialect.h"
+#include "llvm/ADT/MapVector.h"
+#include "llvm/Support/MathExtras.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -89,24 +91,75 @@ public:
   }
 };
 
-// Lower each tt.alloc to the allocation its placement names, a heap
-// memref.alloc for `global` or a stack memref.alloca for `local`, and hand it
-// to its users
-// the way a pointer argument is handed to them: as a memref<*xT> cast back to
-// the original !tt.ptr<T>. The loads and stores already lowered by
+// Attribute names recording a function's scratchpad requirement for the
+// launcher: the bytes it needs and their alignment.
+static constexpr StringLiteral kSpmSizeAttr = "triton_riscv.spm_size";
+static constexpr StringLiteral kSpmAlignAttr = "triton_riscv.spm_align";
+
+// Lower each tt.alloc to the allocation its placement names and hand it to its
+// users the way a pointer argument is handed to them: as a memref<*xT> cast
+// back to the original !tt.ptr<T>. The loads and stores already lowered by
 // StructuredToMemref and UnstructuredToMemref cast their base pointer to
 // memref<*xT>, so the cast pairs fold away in reconcile-unrealized-casts and
 // the accesses address the allocation directly.
 //
-// No dealloc is emitted here. Every compiler pipeline frees heap memrefs with
-// the ownership-based --buffer-deallocation-pipeline, which rejects input that
-// already contains deallocations; it frees the buffer at the end of the
-// function, which is the end of the program instance.
-//
-// `spm` (scratchpad memory, such as TCM) has no lowering yet and is reported
-// as an error rather than placed elsewhere.
+// - `global` is a heap memref.alloc. No dealloc is emitted here: every
+//   compiler pipeline frees heap memrefs with the ownership-based
+//   --buffer-deallocation-pipeline, which rejects input that already contains
+//   deallocations; it frees the buffer at the end of the function, which is
+//   the end of the program instance.
+// - `local` is a stack memref.alloca. The op sits directly in the function
+//   body, so the stack slot lives as long as the program instance.
+// - `spm` takes no hardware into account. The function gets one hidden
+//   trailing argument, memref<S x i8>, the scratchpad region the launcher
+//   provides, and each `spm` buffer is a memref.view of it at an offset. The
+//   buffers are packed in program order, each at its alignment, with no
+//   reuse; S, the bytes needed, and the largest alignment are recorded on the
+//   function as triton_riscv.spm_size and triton_riscv.spm_align.
 static LogicalResult lowerAlloc(ModuleOp moduleOp) {
-  WalkResult result = moduleOp.walk([](triton::AllocOp op) {
+  SmallVector<triton::AllocOp> allocs;
+  moduleOp.walk([&](triton::AllocOp op) { allocs.push_back(op); });
+
+  // Scratchpad layout per function, in program order.
+  struct SpmLayout {
+    SmallVector<std::pair<triton::AllocOp, int64_t>> buffers;
+    int64_t size = 0;
+    int64_t align = 1;
+  };
+  llvm::MapVector<Operation *, SpmLayout> spm;
+  for (triton::AllocOp op : allocs) {
+    if (op.getPlacement() != triton::AllocPlacement::SPM)
+      continue;
+    auto fn = op->getParentOfType<FunctionOpInterface>();
+    SpmLayout &layout = spm[fn];
+    auto ptrType = cast<triton::PointerType>(op.getType());
+    int64_t bytes = static_cast<int64_t>(op.getNumElements()) *
+                    ptrType.getPointeeType().getIntOrFloatBitWidth() / 8;
+    int64_t align = op.getAlignment();
+    int64_t offset = llvm::alignTo(layout.size, align);
+    layout.buffers.push_back({op, offset});
+    layout.size = offset + bytes;
+    layout.align = std::max(layout.align, align);
+  }
+  DenseMap<Operation *, Value> spmBase;
+  for (auto &[fnOp, layout] : spm) {
+    auto fn = cast<FunctionOpInterface>(fnOp);
+    Builder b(fnOp->getContext());
+    auto regionType = MemRefType::get({layout.size}, b.getI8Type());
+    unsigned index = fn.getNumArguments();
+    if (failed(fn.insertArgument(index, regionType, DictionaryAttr(),
+                                 fnOp->getLoc())))
+      return fnOp->emitError("cannot add the scratchpad argument");
+    spmBase[fnOp] = fn.getArgument(index);
+    fnOp->setAttr(kSpmSizeAttr, b.getI64IntegerAttr(layout.size));
+    fnOp->setAttr(kSpmAlignAttr, b.getI64IntegerAttr(layout.align));
+  }
+  DenseMap<Operation *, int64_t> spmOffset;
+  for (auto &[fnOp, layout] : spm)
+    for (auto &[op, offset] : layout.buffers)
+      spmOffset[op] = offset;
+
+  for (triton::AllocOp op : allocs) {
     OpBuilder b(op);
     Location loc = op.getLoc();
     auto ptrType = cast<triton::PointerType>(op.getType());
@@ -120,13 +173,15 @@ static LogicalResult lowerAlloc(ModuleOp moduleOp) {
       alloc = b.create<memref::AllocOp>(loc, memrefType, alignment);
       break;
     case triton::AllocPlacement::LOCAL:
-      // The op sits directly in the function body, so the stack slot lives
-      // as long as the program instance.
       alloc = b.create<memref::AllocaOp>(loc, memrefType, alignment);
       break;
-    case triton::AllocPlacement::SPM:
-      op.emitError("tt.alloc placement 'spm' is not implemented yet");
-      return WalkResult::interrupt();
+    case triton::AllocPlacement::SPM: {
+      Value base = spmBase.lookup(op->getParentOfType<FunctionOpInterface>());
+      Value shift = b.create<arith::ConstantIndexOp>(loc, spmOffset.lookup(op));
+      alloc =
+          b.create<memref::ViewOp>(loc, memrefType, base, shift, ValueRange{});
+      break;
+    }
     }
     Value unranked = b.create<memref::CastOp>(
         loc, UnrankedMemRefType::get(elementType, /*memorySpace=*/0), alloc);
@@ -134,9 +189,8 @@ static LogicalResult lowerAlloc(ModuleOp moduleOp) {
                     .getResult(0);
     op.replaceAllUsesWith(ptr);
     op.erase();
-    return WalkResult::advance();
-  });
-  return failure(result.wasInterrupted());
+  }
+  return success();
 }
 
 class TritonPtrToMemrefPass

@@ -111,6 +111,32 @@ def _ttir_to_ttsharedir(mod):
         return Path(dst_path).read_text()
 
 
+_SPM_ATTR = re.compile(r"triton_riscv\.spm_(size|align) = (\d+) : i64")
+
+
+def _record_spm(ttsharedir: str, metadata, options) -> str:
+    """Copy the kernel's scratchpad requirement into its metadata.
+
+    TritonPtrToMemref records it on the function when the kernel uses
+    tl.alloc(placement="spm"); the launcher acquires that many bytes from the
+    board's SPM driver. A compile target known not to fit gets a warning only:
+    the requirement is checked again, for real, at launch.
+    """
+    found = dict(_SPM_ATTR.findall(ttsharedir))
+    metadata["spm_size"] = int(found.get("size", 0))
+    metadata["spm_align"] = int(found.get("align", 1))
+    if metadata["spm_size"]:
+        from . import spm
+
+        kernel = re.search(r"func\.func (?:public )?@([\w$.]+)", ttsharedir)
+        spm.warn_if_unlikely_to_run(
+            kernel.group(1) if kernel else "?",
+            metadata["spm_size"],
+            options.target_cpu if options is not None else None,
+        )
+    return ttsharedir
+
+
 def _optimize_ttsharedir(ttsharedir: str):
     # We don't apply any optimizations now, but we can add passes if needed.
     return ttsharedir
@@ -940,7 +966,8 @@ class CPUBackend(BaseBackend):
 
     def add_stages(self, stages, options, language):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
-        stages["ttsharedir"] = lambda src, metadata: _ttir_to_ttsharedir(src)
+        stages["ttsharedir"] = lambda src, metadata: _record_spm(
+            _ttir_to_ttsharedir(src), metadata, options)
         stages["ttsharedir.opt"] = lambda src, metadata: _optimize_ttsharedir(src)
         stages["llir"] = lambda src, metadata: _ttsharedir_to_llir(src, options)
         stages["llir.opt"] = lambda src, metadata: _optimize_llir(src, options)

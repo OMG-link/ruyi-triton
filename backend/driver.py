@@ -15,6 +15,7 @@ from triton.runtime.cache import get_cache_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from .paths import _get_llvm_bin_path
+from . import spm
 
 
 def _get_sanitizer_type():
@@ -184,7 +185,43 @@ def _format_of(ty):
     }[ty]
 
 
-def _generate_launcher(constants, signature, kernel_name):
+def _spm_launcher_parts(kernel_name, spm_size, spm_align, spm_header):
+    """The launcher code of a kernel that uses tl.alloc(placement="spm").
+
+    Such a kernel takes the scratchpad region as its trailing argument; the
+    launcher acquires it from the board's driver (spm.py) before any program
+    instance runs and releases it afterwards. Returns the include, the extra
+    kernel parameter declaration, the extra kernel argument, the acquire code
+    and the release code, all empty for a kernel without scratchpad.
+    """
+    if not spm_size:
+        return "", "", "", "void *spm_base = NULL;", ""
+    acquire = f"""
+  spm_lease_t spm_lease;
+  int spm_rc = triton_riscv_spm_acquire({spm_size}, {spm_align}, &spm_lease);
+  if (spm_rc != SPM_OK) {{
+    // spm.raise_acquire_error builds the report and raises SpmOutOfMemoryError.
+    PyObject *spm_mod = PyImport_ImportModule("triton.backends.triton_shared.spm");
+    if (spm_mod) {{
+      PyObject *ret = PyObject_CallMethod(
+          spm_mod, "raise_acquire_error", "isnniiii", spm_rc, "{kernel_name}",
+          (Py_ssize_t){spm_size}, (Py_ssize_t){spm_align}, spm_lease.cpu,
+          spm_lease.domain, spm_lease.busy_block, spm_lease.sys_errno);
+      Py_XDECREF(ret);
+      Py_DECREF(spm_mod);
+    }}
+    if (!PyErr_Occurred())
+      PyErr_SetString(PyExc_RuntimeError, "SPM acquire failed");
+    return NULL;
+  }}
+  void *spm_base = spm_lease.base;"""
+    return (f'#include "spm/{spm_header}"', ", void *", ", spm_base", acquire,
+            "triton_riscv_spm_release(&spm_lease);")
+
+
+def _generate_launcher(constants, signature, kernel_name, spm_size=0, spm_align=1, spm_header=None):
+    spm_include, spm_param, spm_arg, spm_acquire, spm_release = _spm_launcher_parts(
+        kernel_name, spm_size, spm_align, spm_header)
     arg_decls = ", ".join(f"{_ty_to_cpp(ty)} arg{i}" for i, ty in signature.items())
     args_format = "".join(
         [_format_of(_extracted_type(ty)) for ty in signature.values()]
@@ -230,14 +267,15 @@ def _generate_launcher(constants, signature, kernel_name):
 #include <Python.h>
 #include "ExecutionEngine/CRunnerUtils.h"
 #include "ExecutionEngine/CRunnerUtils.cpp"
+{spm_include}
 
 extern "C" {{
   // Each pointer argument uses the raw data-pointer ABI.
   void {kernel_name}({kernel_arg_decls}
-                       int, int, int, int, int, int);
+                       int, int, int, int, int, int{spm_param});
 }}
 
-static void _launch(int gridX, int gridY, int gridZ, {arg_decls}) {{
+static void _launch(void *spm_base, int gridX, int gridY, int gridZ, {arg_decls}) {{
   if (gridX*gridY*gridZ > 0) {{
     // Cast "function" to the real function type.
     // Parallelize independent Triton grid programs when OpenMP is enabled.
@@ -246,7 +284,7 @@ static void _launch(int gridX, int gridY, int gridZ, {arg_decls}) {{
       for(int y = 0; y < gridY; y++) {{
         for(int z = 0; z < gridZ; z++) {{
           {kernel_name}({kernel_parameters}
-                        gridX, gridY, gridZ, x, y, z);
+                        gridX, gridY, gridZ, x, y, z{spm_arg});
         }}
       }}
     }}
@@ -331,7 +369,9 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
   // raise exception asap
   {get_ptr_checks_str};
-  _launch(gridX, gridY, gridZ, {launch_args_str});
+  {spm_acquire}
+  _launch(spm_base, gridX, gridY, gridZ, {launch_args_str});
+  {spm_release}
 
   if (PyErr_Occurred()) {{
     return NULL;
@@ -373,7 +413,7 @@ PyMODINIT_FUNC PyInit___triton_shared_ref_cpu_kernel_launcher(void) {{
 """
 
 
-def compile_module(launcher_src, kernel_placeholder_name):
+def compile_module(launcher_src, kernel_placeholder_name, extra_link_args=()):
     py_version = sys.version_info
     if platform.system() == "Windows":
         py_include_dir = os.path.join(sys.base_prefix, "include")
@@ -572,6 +612,7 @@ def compile_module(launcher_src, kernel_placeholder_name):
                             subprocess_args = _append_openmp_link_args(subprocess_args)
 
                         subprocess_args = _append_vector_math_link_args(subprocess_args)
+                        subprocess_args += list(extra_link_args)
 
                         subprocess.check_call(subprocess_args)
                     else:
@@ -595,6 +636,7 @@ def compile_module(launcher_src, kernel_placeholder_name):
                         if custom_openmp_enabled and not ordinary_openmp_enabled:
                             subprocess_args.append("-fopenmp")
                         subprocess_args = _append_vector_math_link_args(subprocess_args)
+                        subprocess_args += list(extra_link_args)
                         subprocess.check_call(subprocess_args)
 
                 with open(so_path, "rb") as f:
@@ -638,21 +680,32 @@ class CPULauncher(object):
 
         constants = {cst_key(key): value for key, value in constants.items()}
         signature = {cst_key(key): value for key, value in src.signature.items()}
+        # A kernel's scratchpad requirement (compiler.py) is part of its
+        # launcher, so it is part of the key.
+        spm_size = int(getattr(metadata, "spm_size", 0))
+        spm_align = int(getattr(metadata, "spm_align", 1))
+        spm_driver = spm.runtime_driver() if spm_size else None
         launcher_key = (
             tuple(sorted(constants.items())),
             tuple(signature.items()),
+            spm_size,
+            spm_align,
             _get_openmp_num_threads(),
             _get_sanitizer_type(),
         )
         self.launch = _launcher_signature_cache.get(launcher_key)
         if self.launch is not None:
             return
-        launcher_src = _generate_launcher(constants, signature, kernel_placeholder_name)
+        launcher_src = _generate_launcher(
+            constants, signature, kernel_placeholder_name, spm_size, spm_align,
+            spm_driver.header if spm_driver else None)
         # Later KERNEL_NAME_PLACEHOLDER will be used to assign the kernel name
         # in the following launch function.
         self.launch = _compiled_launcher_cache.get(launcher_src)
         if self.launch is None:
-            self.launch = compile_module(launcher_src, kernel_placeholder_name)
+            self.launch = compile_module(
+                launcher_src, kernel_placeholder_name,
+                spm_driver.link_args if spm_driver else ())
             _compiled_launcher_cache[launcher_src] = self.launch
         _launcher_signature_cache[launcher_key] = self.launch
 
