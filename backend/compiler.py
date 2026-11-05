@@ -535,9 +535,11 @@ def _tile_to_vector_args(options, ime=False) -> list:
     target is attached (RISC-V and x86). `--flatten-vector-tiles` then maps
     the n-D vectors and their transfers onto 1-D registers. The IME pipeline
     also converts matmul(A, transpose(B)) of the target's IME tile shapes
-    into vector.contract, which
-    `--lower-vector-contract-to-ime-tile` turns into vmadot tile dots that its
-    `--lower-ime` lowers. `--lower-cpu-sched-barrier` lowers `cpu.sched_barrier` to inline asm that
+    into vector.contract, including those whose K is below the tile's when
+    their operands are loads a masked full-K tile can be read from;
+    `--promote-ime-tile-k` widens those to the tile's K, and
+    `--lower-vector-contract-to-ime-tile` turns all of them into vmadot or
+    vfwmadot tile dots that its `--lower-ime` lowers. `--lower-cpu-sched-barrier` lowers `cpu.sched_barrier` to inline asm that
     holds its values in registers.
     TRITON_RISCV_REMARKS=<regex> prints the optimization remarks whose
     category matches, e.g. `tile-to-vector`; remarks are silent otherwise.
@@ -549,6 +551,8 @@ def _tile_to_vector_args(options, ime=False) -> list:
             "--convert-tile-tensor-to-vector=allow-ime-tile-contracts=true",
             "--canonicalize",
             "--cse",
+            "--promote-ime-tile-k",
+            "--canonicalize",
             "--lower-vector-contract-to-ime-tile",
             "--flatten-vector-tiles",
             "--lower-cpu-sched-barrier",
