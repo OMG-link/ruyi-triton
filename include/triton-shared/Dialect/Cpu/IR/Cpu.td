@@ -62,4 +62,27 @@ def Cpu_SchedBarrierOp : Cpu_Op<"sched_barrier", [
   let hasVerifier = 1;
 }
 
+def Cpu_ShuffleOp : Cpu_Op<"shuffle", [Pure]> {
+  let summary = "Constant shuffle of two tensors or two vectors";
+  let description = [{
+    `vector.shuffle` on ranked tensors as well as vectors. `v1`, `v2` and the
+    result are all tensors or all vectors, with one element type, one rank and
+    the same sizes in every dimension but the first. The result's first
+    dimension has one entry per `mask` element. Mask element `i` selects slice
+    `i` of `v1` when `i < v1.shape[0]`, slice `i - v1.shape[0]` of `v2`
+    otherwise, and an undefined (poison) slice when it is -1.
+
+    The tensor form is what triton-shared emits; tile tensor-to-vector turns it
+    into `vector.shuffle` with the same mask.
+  }];
+  let arguments = (ins AnyTypeOf<[AnyRankedTensor, AnyVectorOfNonZeroRank]>:$v1,
+                       AnyTypeOf<[AnyRankedTensor, AnyVectorOfNonZeroRank]>:$v2,
+                       DenseI64ArrayAttr:$mask);
+  let results = (outs AnyTypeOf<[AnyRankedTensor, AnyVectorOfNonZeroRank]>:$result);
+  let assemblyFormat = [{
+    $v1 `,` $v2 $mask attr-dict `:` type($v1) `,` type($v2) `->` type($result)
+  }];
+  let hasVerifier = 1;
+}
+
 #endif // CPU_DIALECT

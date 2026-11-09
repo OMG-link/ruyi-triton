@@ -165,10 +165,10 @@ index 5a521899ee..7042835f85 100644
      "flip",
 diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
 new file mode 100644
-index 0000000000..127b2ce166
+index 0000000000..ec56b1c385
 --- /dev/null
 +++ b/python/triton/language/dev.py
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,62 @@
 +"""Development operations: ``tl.dev``.
 +
 +These operations let a hand-written kernel state a decision the compiler
@@ -181,6 +181,7 @@ index 0000000000..127b2ce166
 +import builtins
 +
 +from .core import _unwrap_if_constexpr, builtin
++from .core import tuple as _tl_tuple
 +
 +__all__ = ["alloc"]
 +
@@ -222,7 +223,7 @@ index 0000000000..127b2ce166
 +    :rtype: pointer to :code:`dtype`
 +    """
 +    shape = _unwrap_if_constexpr(shape)
-+    if isinstance(shape, tuple):
++    if isinstance(shape, _tl_tuple):
 +        shape = shape.values
 +    if isinstance(shape, (list, builtins.tuple)):
 +        shape = [_unwrap_if_constexpr(d) for d in shape]

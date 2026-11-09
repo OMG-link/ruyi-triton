@@ -114,12 +114,12 @@ index 4da5b10415..456fa1bbd5 100644
             [](TritonOpBuilder &self, int axis) -> Value {
               if (axis < 0 || axis > 3)
 diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
-index 127b2ce166..b4a99c8845 100644
+index ec56b1c385..b443240c02 100644
 --- a/python/triton/language/dev.py
 +++ b/python/triton/language/dev.py
-@@ -11,14 +11,14 @@ import builtins
- 
+@@ -12,14 +12,14 @@ import builtins
  from .core import _unwrap_if_constexpr, builtin
+ from .core import tuple as _tl_tuple
  
 -__all__ = ["alloc"]
 +__all__ = ["alloc", "sched_barrier"]
@@ -135,7 +135,7 @@ index 127b2ce166..b4a99c8845 100644
  
      The buffer holds :code:`prod(shape)` contiguous elements of :code:`dtype`
      in row-major order and is accessed with ordinary :code:`tl.load` and
-@@ -59,3 +59,20 @@ def alloc(shape, dtype, alignment=None, placement="global", _semantic=None):
+@@ -60,3 +60,20 @@ def alloc(shape, dtype, alignment=None, placement="global", _semantic=None):
      alignment = _unwrap_if_constexpr(alignment)
      placement = _unwrap_if_constexpr(placement)
      return _semantic.dev_alloc(shape, dtype, alignment, placement)

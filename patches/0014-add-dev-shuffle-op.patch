@@ -1,0 +1,183 @@
+diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
+index 143eba24d1..b4fb8e03a9 100644
+--- a/include/triton/Dialect/Triton/IR/TritonOps.td
++++ b/include/triton/Dialect/Triton/IR/TritonOps.td
+@@ -678,6 +678,38 @@ def TT_DevAllocOp : TT_Op<"dev.alloc"> {
+ }
+ 
+ // Scheduling barrier for values live across compiler scheduling boundaries.
++//
++// Constant shuffle of two tensors
++//
++def TT_DevShuffleOp : TT_Op<"dev.shuffle", [Pure]> {
++    let summary = "shuffle the elements of two tensors by a constant mask";
++    let description = [{
++      A dev op with the semantics of `vector.shuffle`. `v1` and `v2` have the
++      same element type, the same rank and the same sizes in every dimension
++      but the first. The result's first dimension has one entry per `mask`
++      element, and the rest of its shape is the operands' trailing shape.
++      Mask element `i` selects slice `i` of `v1` when `i < v1.shape[0]`,
++      slice `i - v1.shape[0]` of `v2` otherwise, and an undefined (poison)
++      slice when it is -1. A rank-1 shuffle therefore selects single
++      elements.
++
++      Example, a slide down by one element that shifts in a zero:
++
++      ```mlir
++      %r = tt.dev.shuffle %v, %zero [1, 2, 3, 4] : tensor<4xf16>, tensor<4xf16> -> tensor<4xf16>
++      ```
++    }];
++
++    let arguments = (ins TT_Tensor:$v1, TT_Tensor:$v2,
++                         DenseI64ArrayAttr:$mask);
++    let results = (outs TT_Tensor:$result);
++
++    let assemblyFormat = [{
++      $v1 `,` $v2 $mask attr-dict `:` type($v1) `,` type($v2) `->` type($result)
++    }];
++    let hasVerifier = 1;
++}
++
+ def TT_DevSchedBarrierOp : TT_Op<"dev.sched_barrier",
+                               [DeclareOpInterfaceMethods<
+                                   MemoryEffectsOpInterface>]> {
+diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
+index 0faf5422fc..3d352a36b9 100644
+--- a/lib/Dialect/Triton/IR/Ops.cpp
++++ b/lib/Dialect/Triton/IR/Ops.cpp
+@@ -205,6 +205,31 @@ LogicalResult DevAllocOp::verify() {
+   return success();
+ }
+ 
++//-- DevShuffleOp --
++LogicalResult DevShuffleOp::verify() {
++  auto v1 = cast<RankedTensorType>(getV1().getType());
++  auto v2 = cast<RankedTensorType>(getV2().getType());
++  auto result = cast<RankedTensorType>(getResult().getType());
++  if (v1.getElementType() != v2.getElementType() ||
++      result.getElementType() != v1.getElementType())
++    return emitOpError("operands and result must have one element type");
++  if (v1.getRank() != v2.getRank() || result.getRank() != v1.getRank())
++    return emitOpError("operands and result must have one rank");
++  if (v1.getShape().drop_front() != v2.getShape().drop_front() ||
++      result.getShape().drop_front() != v1.getShape().drop_front())
++    return emitOpError("operands and result must agree in every dimension "
++                       "but the first");
++  ArrayRef<int64_t> mask = getMask();
++  if (static_cast<int64_t>(mask.size()) != result.getDimSize(0))
++    return emitOpError("result's first dimension must equal the mask size");
++  int64_t bound = v1.getDimSize(0) + v2.getDimSize(0);
++  for (int64_t index : mask)
++    if (index < -1 || index >= bound)
++      return emitOpError("mask element ")
++             << index << " is out of range [-1, " << bound << ")";
++  return success();
++}
++
+ LogicalResult DevSchedBarrierOp::verify() {
+   if (getInputs().empty())
+     return emitOpError("requires at least one tensor operand");
+diff --git a/python/src/ir.cc b/python/src/ir.cc
+index 456fa1bbd5..2f5b962371 100644
+--- a/python/src/ir.cc
++++ b/python/src/ir.cc
+@@ -1702,6 +1702,16 @@ void init_triton_ir(py::module &&m) {
+             return results;
+           },
+           py::arg("values"), py::arg("memory") = false)
++      .def("create_dev_shuffle",
++           [](TritonOpBuilder &self, Value &v1, Value &v2,
++              std::vector<int64_t> &mask) -> Value {
++             auto type = cast<RankedTensorType>(v1.getType());
++             SmallVector<int64_t> shape(type.getShape());
++             shape[0] = static_cast<int64_t>(mask.size());
++             auto resultType = RankedTensorType::get(
++                 shape, type.getElementType(), type.getEncoding());
++             return self.create<DevShuffleOp>(resultType, v1, v2, mask);
++           })
+       .def("create_get_num_programs",
+            [](TritonOpBuilder &self, int axis) -> Value {
+              if (axis < 0 || axis > 3)
+diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
+index b443240c02..17dece2346 100644
+--- a/python/triton/language/dev.py
++++ b/python/triton/language/dev.py
+@@ -12,7 +12,7 @@ import builtins
+ from .core import _unwrap_if_constexpr, builtin
+ from .core import tuple as _tl_tuple
+ 
+-__all__ = ["alloc", "sched_barrier"]
++__all__ = ["alloc", "sched_barrier", "shuffle"]
+ 
+ 
+ @builtin
+@@ -77,3 +77,38 @@ def sched_barrier(*tensors, memory=False, _semantic=None):
+     """
+     memory = _unwrap_if_constexpr(memory)
+     return _semantic.dev_sched_barrier(tensors, memory)
++
++
++@builtin
++def shuffle(v1, v2, mask, _semantic=None):
++    """A dev op that shuffles the elements of two tensors by a constant mask.
++
++    It has the semantics of MLIR's :code:`vector.shuffle`. :code:`v1` and
++    :code:`v2` have the same dtype and the same shape except in their first
++    dimension. The result's first dimension has one entry per mask element,
++    and the rest of its shape is the operands' trailing shape. Mask element
++    :code:`i` selects slice :code:`i` of :code:`v1` when
++    :code:`i < v1.shape[0]`, slice :code:`i - v1.shape[0]` of :code:`v2`
++    otherwise, and an undefined slice when it is -1.
++
++    An undefined slice may hold any value, including NaN or infinity, so a
++    result multiplied by zero is not necessarily zero there. To shift in a
++    known value, take it from :code:`v2`: :code:`shuffle(x, zeros,
++    list(range(1, n + 1)))` slides a rank-1 :code:`x` of size :code:`n`
++    down by one element and shifts in a zero.
++
++    :param v1: The first source tensor.
++    :type v1: tl.tensor
++    :param v2: The second source tensor.
++    :type v2: tl.tensor
++    :param mask: Constant indices into the concatenation of :code:`v1` and
++        :code:`v2` along their first dimension, or -1.
++    :type mask: list of ints
++    :rtype: tl.tensor
++    """
++    mask = _unwrap_if_constexpr(mask)
++    if isinstance(mask, _tl_tuple):
++        mask = mask.values
++    if isinstance(mask, (list, builtins.tuple)):
++        mask = [_unwrap_if_constexpr(i) for i in mask]
++    return _semantic.dev_shuffle(v1, v2, mask)
+diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
+index 97a083c5e7..fb5efeea69 100644
+--- a/python/triton/language/semantic.py
++++ b/python/triton/language/semantic.py
+@@ -84,6 +84,26 @@ class TritonSemantic(Generic[TensorTy]):
+         wrapped = tuple(self.tensor(value, tensor.type) for value, tensor in zip(results, tensors))
+         return wrapped[0] if len(wrapped) == 1 else wrapped
+ 
++    def dev_shuffle(self, v1: TensorTy, v2: TensorTy, mask) -> TensorTy:
++        for value in (v1, v2):
++            if not isinstance(value, tl.tensor) or not value.type.is_block():
++                raise TypeError(f"shuffle operands must be block tensors, got {value}")
++        if v1.dtype != v2.dtype:
++            raise ValueError(f"shuffle operands must have one dtype, got {v1.dtype} and {v2.dtype}")
++        shape1 = [int(tl._unwrap_if_constexpr(d)) for d in v1.shape]
++        shape2 = [int(tl._unwrap_if_constexpr(d)) for d in v2.shape]
++        if len(shape1) != len(shape2) or shape1[1:] != shape2[1:]:
++            raise ValueError(f"shuffle operands must agree in every dimension but the first, "
++                             f"got {shape1} and {shape2}")
++        if not isinstance(mask, (list, tuple)) or not mask:
++            raise ValueError(f"shuffle mask must be a non-empty list of constant integers, got {mask}")
++        bound = shape1[0] + shape2[0]
++        for index in mask:
++            if not isinstance(index, int) or isinstance(index, bool) or not -1 <= index < bound:
++                raise ValueError(f"shuffle mask element {index!r} is out of range [-1, {bound})")
++        ret_ty = tl.block_type(v1.dtype, [len(mask)] + shape1[1:])
++        return self.tensor(self.builder.create_dev_shuffle(v1.handle, v2.handle, list(mask)), ret_ty)
++
+ # ===----------------------------------------------------------------------===//
+ #                               Implicit Casting Utilities
+ # ===----------------------------------------------------------------------===//

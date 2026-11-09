@@ -119,6 +119,19 @@ public:
       op.replaceAllUsesWith(lowered.getResults());
       op.erase();
     }
+
+    // tt.dev.shuffle has the semantics of cpu.shuffle on tensors, which
+    // buddy-mlir's tile tensor-to-vector turns into vector.shuffle.
+    SmallVector<triton::DevShuffleOp> shuffles;
+    moduleOp.walk([&](triton::DevShuffleOp op) { shuffles.push_back(op); });
+    for (triton::DevShuffleOp op : shuffles) {
+      OpBuilder builder(op);
+      auto lowered = triton_shared::cpu::ShuffleOp::create(
+          builder, op.getLoc(), op.getType(), op.getV1(), op.getV2(),
+          op.getMaskAttr());
+      op.replaceAllUsesWith(lowered.getResult());
+      op.erase();
+    }
   }
 };
 } // namespace
