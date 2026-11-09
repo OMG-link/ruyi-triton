@@ -1,4 +1,4 @@
-"""Scratchpad memory (SPM) drivers for ``tl.alloc(placement="spm")``.
+"""Scratchpad memory (SPM) drivers for ``tl.dev.alloc(placement="spm")``.
 
 The compiler needs nothing from the hardware: a kernel that uses ``spm`` gets
 one hidden trailing argument, the base of a region of ``spm_size`` bytes, and

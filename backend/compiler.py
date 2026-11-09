@@ -118,7 +118,7 @@ def _record_spm(ttsharedir: str, metadata, options) -> str:
     """Copy the kernel's scratchpad requirement into its metadata.
 
     TritonPtrToMemref records it on the function when the kernel uses
-    tl.alloc(placement="spm"); the launcher acquires that many bytes from the
+    tl.dev.alloc(placement="spm"); the launcher acquires that many bytes from the
     board's SPM driver. A compile target known not to fit gets a warning only:
     the requirement is checked again, for real, at launch.
     """

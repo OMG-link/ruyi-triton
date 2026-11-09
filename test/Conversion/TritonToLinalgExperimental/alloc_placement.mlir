@@ -1,6 +1,6 @@
 // RUN: triton-shared-opt --split-input-file --triton-to-linalg-experimental %s | FileCheck %s
 //
-// tt.alloc honours its placement: global (the default) is a heap
+// tt.dev.alloc honours its placement: global (the default) is a heap
 // memref.alloc, local a stack memref.alloca, both with the requested
 // alignment. spm buffers are views of one hidden trailing argument, the
 // scratchpad region the launcher provides, packed in program order at their
@@ -11,9 +11,9 @@ module {
   tt.func public @global_and_local(%in: !tt.ptr<f32>, %out: !tt.ptr<f32>) {
     // CHECK-DAG: memref.alloc() alignment = 64 : memref<64xf32>
     // CHECK-DAG: memref.alloca() alignment = 128 : memref<64xf32>
-    // CHECK-NOT: tt.alloc
-    %global = tt.alloc {alignment = 64 : i32, num_elements = 64 : i64, placement = 1 : i32} : !tt.ptr<f32>
-    %local = tt.alloc {alignment = 128 : i32, num_elements = 64 : i64, placement = 2 : i32} : !tt.ptr<f32>
+    // CHECK-NOT: tt.dev.alloc
+    %global = tt.dev.alloc {alignment = 64 : i32, num_elements = 64 : i64, placement = 1 : i32} : !tt.ptr<f32>
+    %local = tt.dev.alloc {alignment = 128 : i32, num_elements = 64 : i64, placement = 2 : i32} : !tt.ptr<f32>
     %range = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
     %in_s = tt.splat %in : !tt.ptr<f32> -> tensor<64x!tt.ptr<f32>>
     %in_p = tt.addptr %in_s, %range : tensor<64x!tt.ptr<f32>>, tensor<64xi32>
@@ -44,10 +44,10 @@ module {
   // CHECK-SAME: triton_riscv.spm_align = 128 : i64, triton_riscv.spm_size = 272 : i64
   // CHECK-DAG: memref.view %[[SPM]][%c0{{[_0-9]*}}][] : memref<272xi8> to memref<64xf32>
   // CHECK-DAG: memref.view %[[SPM]][%c256{{[_0-9]*}}][] : memref<272xi8> to memref<16xi8>
-  // CHECK-NOT: tt.alloc
+  // CHECK-NOT: tt.dev.alloc
   tt.func public @spm(%in: !tt.ptr<f32>, %out: !tt.ptr<f32>) {
-    %a = tt.alloc {alignment = 64 : i32, num_elements = 64 : i64, placement = 3 : i32} : !tt.ptr<f32>
-    %b = tt.alloc {alignment = 128 : i32, num_elements = 16 : i64, placement = 3 : i32} : !tt.ptr<i8>
+    %a = tt.dev.alloc {alignment = 64 : i32, num_elements = 64 : i64, placement = 3 : i32} : !tt.ptr<f32>
+    %b = tt.dev.alloc {alignment = 128 : i32, num_elements = 16 : i64, placement = 3 : i32} : !tt.ptr<i8>
     %range = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
     %in_s = tt.splat %in : !tt.ptr<f32> -> tensor<64x!tt.ptr<f32>>
     %in_p = tt.addptr %in_s, %range : tensor<64x!tt.ptr<f32>>, tensor<64xi32>
@@ -76,7 +76,7 @@ module {
   // CHECK-NOT: triton_riscv.spm_size
   // CHECK-SAME: {
   tt.func public @no_spm(%out: !tt.ptr<f32>) {
-    %buf = tt.alloc {alignment = 64 : i32, num_elements = 64 : i64, placement = 2 : i32} : !tt.ptr<f32>
+    %buf = tt.dev.alloc {alignment = 64 : i32, num_elements = 64 : i64, placement = 2 : i32} : !tt.ptr<f32>
     %range = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
     %b_s = tt.splat %buf : !tt.ptr<f32> -> tensor<64x!tt.ptr<f32>>
     %b_p = tt.addptr %b_s, %range : tensor<64x!tt.ptr<f32>>, tensor<64xi32>

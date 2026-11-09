@@ -16,15 +16,15 @@ index a2d49267b5..40dafdb40a 100644
      : public DialectInterface::Base<DialectInferLayoutInterface> {
  public:
 diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
-index fca83e33de..e72771d885 100644
+index 869a112603..1b4f1c1b4c 100644
 --- a/include/triton/Dialect/Triton/IR/TritonOps.td
 +++ b/include/triton/Dialect/Triton/IR/TritonOps.td
-@@ -677,6 +677,35 @@ def TT_AllocOp : TT_Op<"alloc"> {
+@@ -677,6 +677,35 @@ def TT_DevAllocOp : TT_Op<"dev.alloc"> {
      let hasVerifier = 1;
  }
  
 +// Scheduling barrier for values live across compiler scheduling boundaries.
-+def TT_SchedBarrierOp : TT_Op<"sched_barrier",
++def TT_DevSchedBarrierOp : TT_Op<"dev.sched_barrier",
 +                              [DeclareOpInterfaceMethods<
 +                                  MemoryEffectsOpInterface>]> {
 +    let summary = "preserve a scheduling boundary between tensor values";
@@ -56,14 +56,14 @@ index fca83e33de..e72771d885 100644
  // Dot Op
  //
 diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
-index be58363916..c8b236ff9b 100644
+index f793b6da0c..5bc8b16bce 100644
 --- a/lib/Dialect/Triton/IR/Ops.cpp
 +++ b/lib/Dialect/Triton/IR/Ops.cpp
-@@ -205,6 +205,29 @@ LogicalResult AllocOp::verify() {
+@@ -205,6 +205,29 @@ LogicalResult DevAllocOp::verify() {
    return success();
  }
  
-+LogicalResult SchedBarrierOp::verify() {
++LogicalResult DevSchedBarrierOp::verify() {
 +  if (getInputs().empty())
 +    return emitOpError("requires at least one tensor operand");
 +  if (getInputs().size() != getResults().size())
@@ -75,7 +75,7 @@ index be58363916..c8b236ff9b 100644
 +  return success();
 +}
 +
-+void SchedBarrierOp::getEffects(
++void DevSchedBarrierOp::getEffects(
 +    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
 +        &effects) {
 +  effects.emplace_back(MemoryEffects::Write::get(),
@@ -90,7 +90,7 @@ index be58363916..c8b236ff9b 100644
    auto order = getOrder();
    auto srcTy = cast<RankedTensorType>(getSrc().getType());
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 949048a617..18bdde861e 100644
+index 4da5b10415..456fa1bbd5 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -1689,6 +1689,19 @@ void init_triton_ir(py::module &&m) {
@@ -98,12 +98,12 @@ index 949048a617..18bdde861e 100644
                                           placement));
             })
 +      .def(
-+          "create_sched_barrier",
++          "create_dev_sched_barrier",
 +          [](TritonOpBuilder &self, py::list values, bool memory) {
 +            SmallVector<Value> inputs;
 +            for (py::handle value : values)
 +              inputs.push_back(value.cast<Value>());
-+            auto op = self.create<SchedBarrierOp>(inputs, memory);
++            auto op = self.create<DevSchedBarrierOp>(inputs, memory);
 +            py::list results;
 +            for (Value result : op.getResults())
 +              results.append(result);
@@ -113,31 +113,18 @@ index 949048a617..18bdde861e 100644
        .def("create_get_num_programs",
             [](TritonOpBuilder &self, int axis) -> Value {
               if (axis < 0 || axis > 3)
-diff --git a/python/triton/language/__init__.py b/python/triton/language/__init__.py
-index 63c59b7711..b4c86b8ae7 100644
---- a/python/triton/language/__init__.py
-+++ b/python/triton/language/__init__.py
-@@ -31,6 +31,7 @@ from .standard import (
- from .core import (
-     PropagateNan,
-     alloc,
-+    sched_barrier,
-     TRITON_MAX_TENSOR_NUMEL,
-     aggregate_replace,
-     load_tensor_descriptor,
-@@ -143,6 +144,7 @@ from . import target_info
+diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
+index 127b2ce166..b4a99c8845 100644
+--- a/python/triton/language/dev.py
++++ b/python/triton/language/dev.py
+@@ -11,14 +11,14 @@ import builtins
  
- __all__ = [
-     "alloc",
-+    "sched_barrier",
-     "PropagateNan",
-     "TRITON_MAX_TENSOR_NUMEL",
-     "load_tensor_descriptor",
-diff --git a/python/triton/language/core.py b/python/triton/language/core.py
-index b068f8270f..08b5df0137 100644
---- a/python/triton/language/core.py
-+++ b/python/triton/language/core.py
-@@ -1973,8 +1973,8 @@ def num_programs(axis, _semantic=None):
+ from .core import _unwrap_if_constexpr, builtin
+ 
+-__all__ = ["alloc"]
++__all__ = ["alloc", "sched_barrier"]
+ 
+ 
  @builtin
  def alloc(shape, dtype, alignment=None, placement="global", _semantic=None):
      """
@@ -148,10 +135,12 @@ index b068f8270f..08b5df0137 100644
  
      The buffer holds :code:`prod(shape)` contiguous elements of :code:`dtype`
      in row-major order and is accessed with ordinary :code:`tl.load` and
-@@ -2017,6 +2017,23 @@ def alloc(shape, dtype, alignment=None, placement="global", _semantic=None):
-     return _semantic.alloc(shape, dtype, alignment, placement)
- 
- 
+@@ -59,3 +59,20 @@ def alloc(shape, dtype, alignment=None, placement="global", _semantic=None):
+     alignment = _unwrap_if_constexpr(alignment)
+     placement = _unwrap_if_constexpr(placement)
+     return _semantic.dev_alloc(shape, dtype, alignment, placement)
++
++
 +@builtin
 +def sched_barrier(*tensors, memory=False, _semantic=None):
 +    """A dev op that places a scheduling barrier between tensor values.
@@ -166,21 +155,16 @@ index b068f8270f..08b5df0137 100644
 +    :type memory: bool
 +    """
 +    memory = _unwrap_if_constexpr(memory)
-+    return _semantic.sched_barrier(tensors, memory)
-+
-+
- # -----------------------
- # Block Initialization
- # -----------------------
++    return _semantic.dev_sched_barrier(tensors, memory)
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 46b7a6b39d..6f3019d453 100644
+index 8f49a5ec0b..97a083c5e7 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -72,6 +72,18 @@ class TritonSemantic(Generic[TensorTy]):
-             self.builder.create_alloc(ptr_ty.to_ir(self.builder), numel, alignment, placements[placement]),
+             self.builder.create_dev_alloc(ptr_ty.to_ir(self.builder), numel, alignment, placements[placement]),
              ptr_ty)
  
-+    def sched_barrier(self, tensors, memory: bool):
++    def dev_sched_barrier(self, tensors, memory: bool):
 +        if not tensors:
 +            raise ValueError("sched_barrier requires at least one tensor")
 +        if not isinstance(memory, bool):
@@ -188,7 +172,7 @@ index 46b7a6b39d..6f3019d453 100644
 +        for value in tensors:
 +            if not isinstance(value, tl.tensor):
 +                raise TypeError(f"sched_barrier arguments must be tensors, got {type(value).__name__}")
-+        results = self.builder.create_sched_barrier([value.handle for value in tensors], memory)
++        results = self.builder.create_dev_sched_barrier([value.handle for value in tensors], memory)
 +        wrapped = tuple(self.tensor(value, tensor.type) for value, tensor in zip(results, tensors))
 +        return wrapped[0] if len(wrapped) == 1 else wrapped
 +

@@ -109,9 +109,10 @@ public:
       return;
     }
 
-    SmallVector<triton::SchedBarrierOp> barriers;
-    moduleOp.walk([&](triton::SchedBarrierOp op) { barriers.push_back(op); });
-    for (triton::SchedBarrierOp op : barriers) {
+    SmallVector<triton::DevSchedBarrierOp> barriers;
+    moduleOp.walk(
+        [&](triton::DevSchedBarrierOp op) { barriers.push_back(op); });
+    for (triton::DevSchedBarrierOp op : barriers) {
       OpBuilder builder(op);
       auto lowered = triton_shared::cpu::SchedBarrierOp::create(
           builder, op.getLoc(), op.getInputs(), op.getMemoryAttr());

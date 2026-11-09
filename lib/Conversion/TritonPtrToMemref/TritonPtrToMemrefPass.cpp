@@ -96,8 +96,8 @@ public:
 static constexpr StringLiteral kSpmSizeAttr = "triton_riscv.spm_size";
 static constexpr StringLiteral kSpmAlignAttr = "triton_riscv.spm_align";
 
-// Lower each tt.alloc to the allocation its placement names and hand it to its
-// users the way a pointer argument is handed to them: as a memref<*xT> cast
+// Lower each tt.dev.alloc to the allocation its placement names and hand it to
+// its users the way a pointer argument is handed to them: as a memref<*xT> cast
 // back to the original !tt.ptr<T>. The loads and stores already lowered by
 // StructuredToMemref and UnstructuredToMemref cast their base pointer to
 // memref<*xT>, so the cast pairs fold away in reconcile-unrealized-casts and
@@ -117,17 +117,17 @@ static constexpr StringLiteral kSpmAlignAttr = "triton_riscv.spm_align";
 //   reuse; S, the bytes needed, and the largest alignment are recorded on the
 //   function as triton_riscv.spm_size and triton_riscv.spm_align.
 static LogicalResult lowerAlloc(ModuleOp moduleOp) {
-  SmallVector<triton::AllocOp> allocs;
-  moduleOp.walk([&](triton::AllocOp op) { allocs.push_back(op); });
+  SmallVector<triton::DevAllocOp> allocs;
+  moduleOp.walk([&](triton::DevAllocOp op) { allocs.push_back(op); });
 
   // Scratchpad layout per function, in program order.
   struct SpmLayout {
-    SmallVector<std::pair<triton::AllocOp, int64_t>> buffers;
+    SmallVector<std::pair<triton::DevAllocOp, int64_t>> buffers;
     int64_t size = 0;
     int64_t align = 1;
   };
   llvm::MapVector<Operation *, SpmLayout> spm;
-  for (triton::AllocOp op : allocs) {
+  for (triton::DevAllocOp op : allocs) {
     if (op.getPlacement() != triton::AllocPlacement::SPM)
       continue;
     auto fn = op->getParentOfType<FunctionOpInterface>();
@@ -159,7 +159,7 @@ static LogicalResult lowerAlloc(ModuleOp moduleOp) {
     for (auto &[op, offset] : layout.buffers)
       spmOffset[op] = offset;
 
-  for (triton::AllocOp op : allocs) {
+  for (triton::DevAllocOp op : allocs) {
     OpBuilder b(op);
     Location loc = op.getLoc();
     auto ptrType = cast<triton::PointerType>(op.getType());

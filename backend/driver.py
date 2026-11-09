@@ -186,7 +186,7 @@ def _format_of(ty):
 
 
 def _spm_launcher_parts(kernel_name, spm_size, spm_align, spm_header):
-    """The launcher code of a kernel that uses tl.alloc(placement="spm").
+    """The launcher code of a kernel that uses tl.dev.alloc(placement="spm").
 
     Such a kernel takes the scratchpad region as its trailing argument; the
     launcher acquires it from the board's driver (spm.py) before any program

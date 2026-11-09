@@ -1,6 +1,6 @@
 // Common interface of the scratchpad (SPM) drivers that a CPU kernel launcher
-// includes. A launch of a kernel that uses `tl.alloc(placement="spm")` calls
-// triton_riscv_spm_acquire before any program instance runs, passes
+// includes. A launch of a kernel that uses `tl.dev.alloc(placement="spm")`
+// calls triton_riscv_spm_acquire before any program instance runs, passes
 // lease.base as the kernel's trailing argument, and calls
 // triton_riscv_spm_release on every exit path.
 //

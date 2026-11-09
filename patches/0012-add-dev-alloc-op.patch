@@ -1,12 +1,12 @@
 diff --git a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
-index 5a76a1d7b1..dfe18d2b78 100644
+index 5a76a1d7b1..344d434262 100644
 --- a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 +++ b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 @@ -18,6 +18,17 @@ def TT_CacheModifierAttr : I32EnumAttr<
      let cppNamespace = "::mlir::triton";
  }
  
-+// Where tt.alloc places its buffer.
++// Where tt.dev.alloc places its buffer.
 +def TT_AllocPlacementAttr : I32EnumAttr<
 +    "AllocPlacement", "",
 +    [
@@ -21,7 +21,7 @@ index 5a76a1d7b1..dfe18d2b78 100644
      "MemSemantic", "",
      [
 diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
-index 615286a7c5..fca83e33de 100644
+index 615286a7c5..869a112603 100644
 --- a/include/triton/Dialect/Triton/IR/TritonOps.td
 +++ b/include/triton/Dialect/Triton/IR/TritonOps.td
 @@ -625,6 +625,58 @@ def TT_GetNumProgramsOp : TT_Op<"get_num_programs", [Pure]> {
@@ -31,7 +31,7 @@ index 615286a7c5..fca83e33de 100644
 +//
 +// Per-program buffer allocation
 +//
-+def TT_AllocOp : TT_Op<"alloc"> {
++def TT_DevAllocOp : TT_Op<"dev.alloc"> {
 +    let summary = "allocate a buffer private to the program instance";
 +    let description = [{
 +      Allocates `num_elements` contiguous elements of the result's pointee
@@ -67,7 +67,7 @@ index 615286a7c5..fca83e33de 100644
 +      Example:
 +
 +      ```mlir
-+      %buf = tt.alloc {alignment = 64 : i32, num_elements = 256 : i64} : !tt.ptr<f32>
++      %buf = tt.dev.alloc {alignment = 64 : i32, num_elements = 256 : i64} : !tt.ptr<f32>
 +      ```
 +    }];
 +
@@ -84,15 +84,15 @@ index 615286a7c5..fca83e33de 100644
  // Dot Op
  //
 diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
-index 75ee5ed439..be58363916 100644
+index 75ee5ed439..f793b6da0c 100644
 --- a/lib/Dialect/Triton/IR/Ops.cpp
 +++ b/lib/Dialect/Triton/IR/Ops.cpp
 @@ -189,6 +189,22 @@ OpFoldResult TransOp::fold(FoldAdaptor adaptor) {
    return {};
  }
  
-+//-- AllocOp --
-+LogicalResult AllocOp::verify() {
++//-- DevAllocOp --
++LogicalResult DevAllocOp::verify() {
 +  if (static_cast<int64_t>(getNumElements()) <= 0)
 +    return emitOpError("num_elements must be positive");
 +  uint32_t alignment = getAlignment();
@@ -111,7 +111,7 @@ index 75ee5ed439..be58363916 100644
    auto order = getOrder();
    auto srcTy = cast<RankedTensorType>(getSrc().getType());
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 58592bf888..949048a617 100644
+index 58592bf888..4da5b10415 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -242,6 +242,12 @@ void init_triton_ir(py::module &&m) {
@@ -131,10 +131,10 @@ index 58592bf888..949048a617 100644
                 throw pybind11::index_error("program_id must be in [0,3]");
               return self.create<GetProgramIdOp>(axis);
             })
-+      .def("create_alloc",
++      .def("create_dev_alloc",
 +           [](TritonOpBuilder &self, Type &ptrType, int64_t numElements,
 +              int32_t alignment, AllocPlacement placement) -> Value {
-+             return self.create<AllocOp>(
++             return self.create<DevAllocOp>(
 +                 ptrType, self.getBuilder().getI64IntegerAttr(numElements),
 +                 self.getBuilder().getI32IntegerAttr(alignment),
 +                 AllocPlacementAttr::get(self.getBuilder().getContext(),
@@ -144,33 +144,47 @@ index 58592bf888..949048a617 100644
             [](TritonOpBuilder &self, int axis) -> Value {
               if (axis < 0 || axis > 3)
 diff --git a/python/triton/language/__init__.py b/python/triton/language/__init__.py
-index 5a521899ee..63c59b7711 100644
+index 5a521899ee..7042835f85 100644
 --- a/python/triton/language/__init__.py
 +++ b/python/triton/language/__init__.py
-@@ -30,6 +30,7 @@ from .standard import (
- )
- from .core import (
-     PropagateNan,
-+    alloc,
-     TRITON_MAX_TENSOR_NUMEL,
-     aggregate_replace,
-     load_tensor_descriptor,
-@@ -141,6 +142,7 @@ from .random import (
- from . import target_info
+@@ -2,6 +2,7 @@
+ # Import order is significant here.
  
- __all__ = [
-+    "alloc",
-     "PropagateNan",
-     "TRITON_MAX_TENSOR_NUMEL",
-     "load_tensor_descriptor",
-diff --git a/python/triton/language/core.py b/python/triton/language/core.py
-index 50d2af2d79..b068f8270f 100644
---- a/python/triton/language/core.py
-+++ b/python/triton/language/core.py
-@@ -1970,6 +1970,53 @@ def num_programs(axis, _semantic=None):
-     return _semantic.num_programs(axis)
- 
- 
+ from . import math
++from . import dev
+ from . import extra
+ from .standard import (
+     argmax,
+@@ -191,6 +192,7 @@ __all__ = [
+     "exp",
+     "exp2",
+     "expand_dims",
++    "dev",
+     "extra",
+     "fdiv",
+     "flip",
+diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
+new file mode 100644
+index 0000000000..127b2ce166
+--- /dev/null
++++ b/python/triton/language/dev.py
+@@ -0,0 +1,61 @@
++"""Development operations: ``tl.dev``.
++
++These operations let a hand-written kernel state a decision the compiler
++will make on its own once the corresponding lowering exists (where a buffer
++lives, where scheduling must not cross, how registers are permuted). They are
++temporary: their interface may change or disappear, and only backends that
++implement them accept them.
++"""
++
++import builtins
++
++from .core import _unwrap_if_constexpr, builtin
++
++__all__ = ["alloc"]
++
++
 +@builtin
 +def alloc(shape, dtype, alignment=None, placement="global", _semantic=None):
 +    """
@@ -215,21 +229,16 @@ index 50d2af2d79..b068f8270f 100644
 +    dtype = _unwrap_if_constexpr(dtype)
 +    alignment = _unwrap_if_constexpr(alignment)
 +    placement = _unwrap_if_constexpr(placement)
-+    return _semantic.alloc(shape, dtype, alignment, placement)
-+
-+
- # -----------------------
- # Block Initialization
- # -----------------------
++    return _semantic.dev_alloc(shape, dtype, alignment, placement)
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 1f12927ca4..46b7a6b39d 100644
+index 1f12927ca4..8f49a5ec0b 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -46,6 +46,32 @@ class TritonSemantic(Generic[TensorTy]):
              raise ValueError(f"num_programs axis must be 0, 1, or 2 but got {axis}")
          return self.tensor(self.builder.create_get_num_programs(axis), tl.int32)
  
-+    def alloc(self, shape, dtype: tl.dtype, alignment, placement) -> TensorTy:
++    def dev_alloc(self, shape, dtype: tl.dtype, alignment, placement) -> TensorTy:
 +        if isinstance(shape, int):
 +            shape = [shape]
 +        numel = 1
@@ -252,7 +261,7 @@ index 1f12927ca4..46b7a6b39d 100644
 +            raise ValueError(f"alloc placement must be 'global', 'local' or 'spm', got {placement!r}")
 +        ptr_ty = tl.pointer_type(dtype)
 +        return self.tensor(
-+            self.builder.create_alloc(ptr_ty.to_ir(self.builder), numel, alignment, placements[placement]),
++            self.builder.create_dev_alloc(ptr_ty.to_ir(self.builder), numel, alignment, placements[placement]),
 +            ptr_ty)
 +
  # ===----------------------------------------------------------------------===//

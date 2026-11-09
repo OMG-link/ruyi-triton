@@ -14,7 +14,7 @@ def _stage_chunks_kernel(x_ptr, out_ptr, NCHUNK: tl.constexpr, BLOCK: tl.constex
     # Each program copies its NCHUNK x BLOCK row into scratch chunk by chunk,
     # then reads the chunks back in reverse order.
     pid = tl.program_id(0)
-    buf = tl.alloc(NCHUNK * BLOCK, tl.float32)
+    buf = tl.dev.alloc(NCHUNK * BLOCK, tl.float32)
     offs = tl.arange(0, BLOCK)
     row = pid * NCHUNK * BLOCK
     for i in range(NCHUNK):
@@ -38,7 +38,7 @@ def _scratch_accumulator_kernel(x_ptr, out_ptr, K, M: tl.constexpr, N: tl.conste
     # A 2-D accumulator lives in scratch across loop iterations: each
     # iteration loads it, adds one input tile and stores it back.
     pid = tl.program_id(0)
-    acc = tl.alloc((M, N), tl.float32)
+    acc = tl.dev.alloc((M, N), tl.float32)
     om = tl.arange(0, M)[:, None]
     on = tl.arange(0, N)[None, :]
     tl.store(acc + om * N + on, tl.zeros((M, N), tl.float32))
@@ -66,7 +66,7 @@ def _scratch_int_kernel(x_ptr, out_ptr, BLOCK: tl.constexpr):
     # Integer scratch with an explicit alignment, written at a program-dependent
     # offset inside the buffer.
     pid = tl.program_id(0)
-    buf = tl.alloc(4 * BLOCK, tl.int32, alignment=128)
+    buf = tl.dev.alloc(4 * BLOCK, tl.int32, alignment=128)
     offs = tl.arange(0, BLOCK)
     x = tl.load(x_ptr + pid * BLOCK + offs)
     slot = pid % 4
@@ -88,7 +88,7 @@ def test_scratch_int(device):
 def _alloc_placement_kernel(x_ptr, out_ptr, BLOCK: tl.constexpr, PLACEMENT: tl.constexpr):
     # A round trip through scratch at the requested placement.
     pid = tl.program_id(0)
-    buf = tl.alloc(BLOCK, tl.float32, placement=PLACEMENT)
+    buf = tl.dev.alloc(BLOCK, tl.float32, placement=PLACEMENT)
     offs = tl.arange(0, BLOCK)
     tl.store(buf + offs, tl.load(x_ptr + pid * BLOCK + offs) + 1.0)
     tl.store(out_ptr + pid * BLOCK + offs, tl.load(buf + offs))
@@ -146,7 +146,7 @@ def _spm_driver():
 
 @triton.jit
 def _spm_big_kernel(out_ptr, N: tl.constexpr):
-    buf = tl.alloc(N, tl.int8, placement="spm")
+    buf = tl.dev.alloc(N, tl.int8, placement="spm")
     offs = tl.arange(0, 64)
     tl.store(buf + offs, offs.to(tl.int8))
     tl.store(out_ptr + offs, tl.load(buf + offs))

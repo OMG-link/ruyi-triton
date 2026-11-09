@@ -31,7 +31,7 @@ N = _tile()
 def _single_barrier_kernel(x_ptr, out_ptr, MEMORY: tl.constexpr, N: tl.constexpr):
     offs = tl.arange(0, N)
     x = tl.load(x_ptr + offs)
-    x = tl.sched_barrier(x, memory=MEMORY)
+    x = tl.dev.sched_barrier(x, memory=MEMORY)
     tl.store(out_ptr + offs, x * 2.0)
 
 
@@ -40,13 +40,13 @@ def _multiple_barrier_kernel(a_ptr, b_ptr, out_ptr, N: tl.constexpr):
     offs = tl.arange(0, N)
     a = tl.load(a_ptr + offs)
     b = tl.load(b_ptr + offs)
-    a, b = tl.sched_barrier(a, b)
+    a, b = tl.dev.sched_barrier(a, b)
     tl.store(out_ptr + offs, a + b)
 
 
 @triton.jit
 def _zero_argument_barrier_kernel(out_ptr):
-    tl.sched_barrier()
+    tl.dev.sched_barrier()
     tl.store(out_ptr, 1.0)
 
 
@@ -54,7 +54,7 @@ def _zero_argument_barrier_kernel(out_ptr):
 def _non_tensor_barrier_kernel(x_ptr, out_ptr):
     offs = tl.arange(0, 4)
     x = tl.load(x_ptr + offs)
-    x, _ = tl.sched_barrier(x, 1)
+    x, _ = tl.dev.sched_barrier(x, 1)
     tl.store(out_ptr + offs, x)
 
 
@@ -62,7 +62,7 @@ def _non_tensor_barrier_kernel(x_ptr, out_ptr):
 def _ragged_barrier_kernel(x_ptr, out_ptr):
     offs = tl.arange(0, 3)
     x = tl.load(x_ptr + offs)
-    x = tl.sched_barrier(x)
+    x = tl.dev.sched_barrier(x)
     tl.store(out_ptr + offs, x)
 
 
@@ -132,7 +132,7 @@ triton.runtime.driver.set_active(CPUDriver())
 def barrier_kernel(x, y):
     offsets = tl.arange(0, 4)
     values = tl.load(x + offsets)
-    values = tl.sched_barrier(values)
+    values = tl.dev.sched_barrier(values)
     tl.store(y + offsets, values + 1.0)
 
 x = torch.zeros((4,), dtype=torch.float32)
