@@ -141,6 +141,17 @@ def _generate_launcher(constants, signature, kernel_name):
 #include "ExecutionEngine/CRunnerUtils.h"
 #include "ExecutionEngine/CRunnerUtils.cpp"
 
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+#if defined(__linux__)
+#include <sched.h>
+#endif
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
 extern "C" {{
   // Pointer type (=Memref) becomes int64_t + MemRef struct
   // FIXME: understand what this int64_t is used for.
@@ -148,22 +159,153 @@ extern "C" {{
                        int, int, int, int, int, int);
 }}
 
+// ---------------------------------------------------------------------------
+// Program instance level parallelism
+//
+// A Triton launch grid is a set of independent program instances.  The grid is
+// traversed in parallel by the OpenMP team that drives the loop nest in
+// _launch below; the team size is derived from the CPUs available to this
+// process so that a launch never spawns more threads than the machine can run
+// at the same time.  Supporting tools (num_warps, cluster affinity, ...) build
+// on this outer level of parallelism.
+// ---------------------------------------------------------------------------
+
+// One trace entry per program instance. Each instance only writes its own slot,
+// so recording does not need any synchronization. Tracing is enabled through
+// TRITON_CPU_TRACE_FILE and is only meant for tests / debugging.
+struct _TritonCpuTraceEntry {{
+  long long start_ns;
+  long long end_ns;
+  int thread_id;
+  int cpu;
+}};
+
+static long long _triton_cpu_now_ns() {{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}}
+
+static int _triton_cpu_thread_id() {{
+#if defined(_OPENMP)
+  return omp_get_thread_num();
+#else
+  return 0;
+#endif
+}}
+
+static int _triton_cpu_current_cpu() {{
+#if defined(__linux__)
+  return sched_getcpu();
+#else
+  return -1;
+#endif
+}}
+
+// Number of program instances executed concurrently. TRITON_CPU_NUM_THREADS
+// overrides the automatic choice (tests use it to obtain a serial baseline).
+static int _triton_cpu_num_worker_threads(long long num_instances) {{
+  int workers = 0;
+  const char *env = getenv("TRITON_CPU_NUM_THREADS");
+  if (env != nullptr) {{
+    const int requested = atoi(env);
+    if (requested > 0) {{
+      workers = requested;
+    }}
+  }}
+  if (workers <= 0) {{
+#if defined(_OPENMP)
+    workers = omp_get_num_procs();
+#endif
+  }}
+#if defined(__linux__)
+  if (workers <= 0) {{
+    cpu_set_t set;
+    if (sched_getaffinity(0, sizeof(set), &set) == 0) {{
+      workers = CPU_COUNT(&set);
+    }}
+  }}
+#endif
+  if (workers <= 0) {{
+    workers = 1;
+  }}
+  if (num_instances < (long long)workers) {{
+    workers = (int)num_instances;
+  }}
+  return workers > 0 ? workers : 1;
+}}
+
+static void _triton_cpu_write_trace(
+    const char *path, const std::vector<_TritonCpuTraceEntry> &entries) {{
+  FILE *file = fopen(path, "w");
+  if (file == nullptr) {{
+    return;
+  }}
+  // Newlines are emitted as raw character codes so that the generated source
+  // does not need any escape sequences.
+  fputs("instance,start_ns,end_ns,thread_id,cpu", file);
+  fputc(10, file);
+  for (size_t i = 0; i < entries.size(); ++i) {{
+    fprintf(file, "%zu,%lld,%lld,%d,%d", i, entries[i].start_ns,
+            entries[i].end_ns, entries[i].thread_id, entries[i].cpu);
+    fputc(10, file);
+  }}
+  fclose(file);
+}}
+
 static void _launch(int gridX, int gridY, int gridZ, {arg_decls}) {{
-  if (gridX*gridY*gridZ > 0) {{
-    // Cast "function" to the real function type.
-    // apply parallelization to the triton grid when using ThreadSanitizer (TSan)
-    // to help detect potential data races across program instances during kernel execution
-    {"#pragma omp parallel for collapse(3)" if _get_sanitizer_type() == "tsan" else ""}
-    for(int x = 0; x < gridX; x++) {{
-      for(int y = 0; y < gridY; y++) {{
-        for(int z = 0; z < gridZ; z++) {{
-          // Use some random type "char" here.
-          {' '.join(f'StridedMemRefType<char, 0> ptr_arg{i} = {{static_cast<char *>(arg{i}), static_cast<char *>(arg{i}), 0}};' for i, ty in signature.items() if i not in constants and ty[0] == "*")}
-          {kernel_name}({kernel_parameters}
-                        gridX, gridY, gridZ, x, y, z);
+  const long long num_instances =
+      (long long)gridX * (long long)gridY * (long long)gridZ;
+  if (num_instances <= 0) {{
+    return;
+  }}
+  const long long grid_yz = (long long)gridY * (long long)gridZ;
+
+  const char *trace_path = getenv("TRITON_CPU_TRACE_FILE");
+  const bool tracing = trace_path != nullptr && trace_path[0] != 0;
+  std::vector<_TritonCpuTraceEntry> trace_entries(
+      tracing ? (size_t)num_instances : 0);
+
+  const int worker_threads = _triton_cpu_num_worker_threads(num_instances);
+#if !defined(_OPENMP)
+  // Without OpenMP support the loop nest below degrades to a serial traversal.
+  (void)worker_threads;
+#endif
+
+  // Program instances are independent, so the whole grid can be traversed in
+  // parallel. collapse(3) flattens the grid loop into a single iteration space
+  // that is handed out dynamically: program instances do not all cost the same
+  // (the K1 has heterogeneous clusters), so dynamic scheduling keeps every
+  // worker busy until the end. if(worker_threads > 1) keeps small launches
+  // (including grid == 1) free of any team setup.
+#if defined(_OPENMP)
+#pragma omp parallel for collapse(3) schedule(dynamic, 1) num_threads(worker_threads) if (worker_threads > 1)
+#endif
+  for(int x = 0; x < gridX; x++) {{
+    for(int y = 0; y < gridY; y++) {{
+      for(int z = 0; z < gridZ; z++) {{
+        const long long instance_id =
+            (long long)x * grid_yz + (long long)y * gridZ + z;
+        _TritonCpuTraceEntry *entry =
+            tracing ? &trace_entries[(size_t)instance_id] : nullptr;
+        if (entry != nullptr) {{
+          entry->start_ns = _triton_cpu_now_ns();
+          entry->thread_id = _triton_cpu_thread_id();
+          entry->cpu = _triton_cpu_current_cpu();
+        }}
+        // Use some random type "char" here.
+        {' '.join(f'StridedMemRefType<char, 0> ptr_arg{i} = {{static_cast<char *>(arg{i}), static_cast<char *>(arg{i}), 0}};' for i, ty in signature.items() if i not in constants and ty[0] == "*")}
+        {kernel_name}({kernel_parameters}
+                      gridX, gridY, gridZ, x, y, z);
+        if (entry != nullptr) {{
+          entry->end_ns = _triton_cpu_now_ns();
         }}
       }}
     }}
+  }}
+
+  if (tracing) {{
+    _triton_cpu_write_trace(trace_path, trace_entries);
   }}
 }}
 
@@ -429,22 +571,35 @@ def compile_module(launcher_src, kernel_placeholder_name):
 
                         subprocess.check_call(subprocess_args)
                     else:
-                        subprocess.check_call(
-                            [
-                                "g++",
-                                "-std=c++17",
-                                launcher_src_path,
-                                obj_path,
-                                f"-I{py_include_dir}",
-                                f"-I{include_dir}",
-                                f"-L{py_lib_dir}",
-                                "-shared",
-                                f"-l{py_lib}",
-                                "-fPIC",
-                                "-o",
-                                so_path,
-                            ]
-                        )
+                        subprocess_args = [
+                            "g++",
+                            "-std=c++17",
+                            launcher_src_path,
+                            obj_path,
+                            f"-I{py_include_dir}",
+                            f"-I{include_dir}",
+                            f"-L{py_lib_dir}",
+                            "-shared",
+                            f"-l{py_lib}",
+                            "-fPIC",
+                            "-o",
+                            so_path,
+                        ]
+                        try:
+                            # The launcher drives the launch grid with an OpenMP
+                            # parallel loop, see _launch in _generate_launcher.
+                            subprocess.check_call(subprocess_args + ["-fopenmp"])
+                        except subprocess.CalledProcessError:
+                            # Toolchains without OpenMP (e.g. Apple clang without
+                            # libomp) still build: the generated code guards the
+                            # parallel loop with `#if defined(_OPENMP)`, so the
+                            # launch grid is then traversed serially.
+                            print(
+                                "warning: launcher compilation with -fopenmp failed; "
+                                "program instances will be executed serially",
+                                file=sys.stderr,
+                            )
+                            subprocess.check_call(subprocess_args)
 
                 with open(so_path, "rb") as f:
                     cache_path = cache.put(f.read(), filename, binary=True)
