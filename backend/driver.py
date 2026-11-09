@@ -41,6 +41,84 @@ def _sanitizer_available(sanitizer_type):
     return True
 
 
+def _sanitizer_flags(sanitizer_type):
+    if sanitizer_type == "asan":
+        return ["-g", "-fsanitize=address", "-mllvm", "-asan-stack=0"]
+    if sanitizer_type == "tsan":
+        return ["-g", "-fsanitize=thread"]
+    return []
+
+
+# -------------------- CPU runtime -------------------------
+# The worker pool that executes launch grids lives in its own shared library
+# (backend/runtime/triton_cpu_rt.*).  It is built on first use on the machine
+# that runs the kernels and cached like any other Triton artifact.  Every
+# kernel launcher links against the same library, so a process has a single
+# pool no matter how many kernels it launches.
+
+_RUNTIME_DIR = Path(__file__).resolve().parent / "runtime"
+_RUNTIME_FILES = ("triton_cpu_rt.h", "triton_cpu_rt.cpp")
+_runtime_libraries = {}
+
+
+def _runtime_source_bytes():
+    return b"".join((_RUNTIME_DIR / name).read_bytes() for name in _RUNTIME_FILES)
+
+
+def _cxx_for(sanitizer_type):
+    return _get_llvm_bin_path("clang++") if sanitizer_type != "" else "g++"
+
+
+def _get_runtime_library(sanitizer_type):
+    """Returns (path, key) of the CPU runtime library, building it if needed.
+
+    The file name embeds the key and is also used as soname: the dynamic loader
+    identifies libraries by soname, so two different builds must never share
+    one, otherwise the first one loaded would silently serve both.
+    """
+    cached = _runtime_libraries.get(sanitizer_type)
+    if cached is not None and os.path.exists(cached[0]):
+        return cached
+
+    cxx = _cxx_for(sanitizer_type)
+    flags = [
+        "-O2",
+        "-std=c++17",
+        "-fPIC",
+        "-shared",
+        "-pthread",
+        *_sanitizer_flags(sanitizer_type),
+    ]
+    key = hashlib.sha256(
+        _runtime_source_bytes() + " ".join([cxx, *flags]).encode("utf-8")
+    ).hexdigest()
+    name = f"libtriton_cpu_rt.{key[:16]}.so"
+    cache = get_cache_manager(key)
+    path = cache.get_file(name)
+    if path is None:
+        if platform.system() == "Darwin":
+            soname = f"-Wl,-install_name,@rpath/{name}"
+        else:
+            soname = f"-Wl,-soname,{name}"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, name)
+            subprocess.check_call(
+                [
+                    cxx,
+                    *flags,
+                    str(_RUNTIME_DIR / "triton_cpu_rt.cpp"),
+                    f"-I{_RUNTIME_DIR}",
+                    soname,
+                    "-o",
+                    out_path,
+                ]
+            )
+            path = cache.put(Path(out_path).read_bytes(), name, binary=True)
+
+    _runtime_libraries[sanitizer_type] = (path, key)
+    return path, key
+
+
 # -------------------- Launcher ----------------------------
 def _ty_to_cpp(ty):
     if ty[0] == "*":
@@ -94,8 +172,15 @@ def _format_of(ty):
     }[ty]
 
 
+# Replaced by the threads per program instance of the kernel when the launcher
+# is specialized for it (see compile_module).
+_CPU_THREADS_PLACEHOLDER = "TRITON_CPU_THREADS_PLACEHOLDER"
+
+
 def _generate_launcher(constants, signature, kernel_name):
-    arg_decls = ", ".join(f"{_ty_to_cpp(ty)} arg{i}" for i, ty in signature.items())
+    arg_decls = "".join(
+        f", {_ty_to_cpp(ty)} arg{i}" for i, ty in signature.items()
+    )
     args_format = "".join(
         [_format_of(_extracted_type(ty)) for ty in signature.values()]
     )
@@ -113,15 +198,27 @@ def _generate_launcher(constants, signature, kernel_name):
     )
     kernel_arg_decls += ", " if kernel_arg_decls else ""
 
-    kernel_parameters = ", ".join(
-        f"static_cast<{_ty_to_cpp(ty)}>(arg{i})" if ty[0] != "*" else f"0, &ptr_arg{i}"
-        for i, ty in signature.items()
-        if ty != "constexpr"
-    )
-    kernel_parameters += ", " if kernel_parameters else ""
+    # Arguments forwarded to the kernel; constexprs are folded into the kernel
+    # at compile time and are not passed.
+    kernel_args = [(i, ty) for i, ty in signature.items() if ty != "constexpr"]
 
-    launch_args_str = ", ".join(
-        f"ptr_info{i}.dev_ptr" if ty[0] == "*" else f"_arg{i}"
+    args_fields = "".join(f"  {_ty_to_cpp(ty)} arg{i};\n" for i, ty in kernel_args)
+    args_init = "".join(f"  kargs.arg{i} = arg{i};\n" for i, ty in kernel_args)
+    # Pointer type (=Memref) becomes int64_t + MemRef struct.  Use some random
+    # type "char" here.
+    memref_decls = "".join(
+        f"  StridedMemRefType<char, 0> ptr_arg{i} = "
+        f"{{static_cast<char *>(a->arg{i}), static_cast<char *>(a->arg{i}), 0}};\n"
+        for i, ty in kernel_args
+        if ty[0] == "*"
+    )
+    kernel_parameters = "".join(
+        f"a->arg{i}, " if ty[0] != "*" else f"0, &ptr_arg{i}, "
+        for i, ty in kernel_args
+    )
+
+    launch_args_str = "".join(
+        f", ptr_info{i}.dev_ptr" if ty[0] == "*" else f", _arg{i}"
         for i, ty in signature.items()
     )
     get_ptr_checks_str = "; ".join(
@@ -140,17 +237,9 @@ def _generate_launcher(constants, signature, kernel_name):
 #include <Python.h>
 #include "ExecutionEngine/CRunnerUtils.h"
 #include "ExecutionEngine/CRunnerUtils.cpp"
+#include "triton_cpu_rt.h"
 
-#include <chrono>
-#include <cstdio>
 #include <cstdlib>
-#include <vector>
-#if defined(__linux__)
-#include <sched.h>
-#endif
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
 
 extern "C" {{
   // Pointer type (=Memref) becomes int64_t + MemRef struct
@@ -162,151 +251,40 @@ extern "C" {{
 // ---------------------------------------------------------------------------
 // Program instance level parallelism
 //
-// A Triton launch grid is a set of independent program instances.  The grid is
-// traversed in parallel by the OpenMP team that drives the loop nest in
-// _launch below; the team size is derived from the CPUs available to this
-// process so that a launch never spawns more threads than the machine can run
-// at the same time.  Supporting tools (num_warps, cluster affinity, ...) build
-// on this outer level of parallelism.
+// The launch grid is executed by the CPU runtime (triton_cpu_rt): tcrt_launch()
+// runs every program instance exactly once on the runtime's worker pool and
+// returns when the whole grid is done.  The launcher only packs the kernel
+// arguments and provides the per instance entry point below.
 // ---------------------------------------------------------------------------
 
-// One trace entry per program instance. Each instance only writes its own slot,
-// so recording does not need any synchronization. Tracing is enabled through
-// TRITON_CPU_TRACE_FILE and is only meant for tests / debugging.
-struct _TritonCpuTraceEntry {{
-  long long start_ns;
-  long long end_ns;
-  int thread_id;
-  int cpu;
-}};
+struct _KernelArgs {{
+  int gridX, gridY, gridZ;
+{args_fields}}};
 
-static long long _triton_cpu_now_ns() {{
-  return std::chrono::duration_cast<std::chrono::nanoseconds>(
-             std::chrono::steady_clock::now().time_since_epoch())
-      .count();
+static void _instance(void *raw, int x, int y, int z) {{
+  const _KernelArgs *a = static_cast<const _KernelArgs *>(raw);
+{memref_decls}  {kernel_name}({kernel_parameters}
+                a->gridX, a->gridY, a->gridZ, x, y, z);
 }}
 
-static int _triton_cpu_thread_id() {{
-#if defined(_OPENMP)
-  return omp_get_thread_num();
-#else
-  return 0;
-#endif
-}}
-
-static int _triton_cpu_current_cpu() {{
-#if defined(__linux__)
-  return sched_getcpu();
-#else
-  return -1;
-#endif
-}}
-
-// Number of program instances executed concurrently. TRITON_CPU_NUM_THREADS
-// overrides the automatic choice (tests use it to obtain a serial baseline).
-static int _triton_cpu_num_worker_threads(long long num_instances) {{
-  int workers = 0;
-  const char *env = getenv("TRITON_CPU_NUM_THREADS");
-  if (env != nullptr) {{
-    const int requested = atoi(env);
-    if (requested > 0) {{
-      workers = requested;
-    }}
-  }}
-  if (workers <= 0) {{
-#if defined(_OPENMP)
-    workers = omp_get_num_procs();
-#endif
-  }}
-#if defined(__linux__)
-  if (workers <= 0) {{
-    cpu_set_t set;
-    if (sched_getaffinity(0, sizeof(set), &set) == 0) {{
-      workers = CPU_COUNT(&set);
-    }}
-  }}
-#endif
-  if (workers <= 0) {{
-    workers = 1;
-  }}
-  if (num_instances < (long long)workers) {{
-    workers = (int)num_instances;
-  }}
-  return workers > 0 ? workers : 1;
-}}
-
-static void _triton_cpu_write_trace(
-    const char *path, const std::vector<_TritonCpuTraceEntry> &entries) {{
-  FILE *file = fopen(path, "w");
-  if (file == nullptr) {{
-    return;
-  }}
-  // Newlines are emitted as raw character codes so that the generated source
-  // does not need any escape sequences.
-  fputs("instance,start_ns,end_ns,thread_id,cpu", file);
-  fputc(10, file);
-  for (size_t i = 0; i < entries.size(); ++i) {{
-    fprintf(file, "%zu,%lld,%lld,%d,%d", i, entries[i].start_ns,
-            entries[i].end_ns, entries[i].thread_id, entries[i].cpu);
-    fputc(10, file);
-  }}
-  fclose(file);
-}}
-
-static void _launch(int gridX, int gridY, int gridZ, {arg_decls}) {{
-  const long long num_instances =
-      (long long)gridX * (long long)gridY * (long long)gridZ;
-  if (num_instances <= 0) {{
-    return;
-  }}
-  const long long grid_yz = (long long)gridY * (long long)gridZ;
-
-  const char *trace_path = getenv("TRITON_CPU_TRACE_FILE");
-  const bool tracing = trace_path != nullptr && trace_path[0] != 0;
-  std::vector<_TritonCpuTraceEntry> trace_entries(
-      tracing ? (size_t)num_instances : 0);
-
-  const int worker_threads = _triton_cpu_num_worker_threads(num_instances);
-#if !defined(_OPENMP)
-  // Without OpenMP support the loop nest below degrades to a serial traversal.
-  (void)worker_threads;
-#endif
-
-  // Program instances are independent, so the whole grid can be traversed in
-  // parallel. collapse(3) flattens the grid loop into a single iteration space
-  // that is handed out dynamically: program instances do not all cost the same
-  // (the K1 has heterogeneous clusters), so dynamic scheduling keeps every
-  // worker busy until the end. if(worker_threads > 1) keeps small launches
-  // (including grid == 1) free of any team setup.
-#if defined(_OPENMP)
-#pragma omp parallel for collapse(3) schedule(dynamic, 1) num_threads(worker_threads) if (worker_threads > 1)
-#endif
-  for(int x = 0; x < gridX; x++) {{
-    for(int y = 0; y < gridY; y++) {{
-      for(int z = 0; z < gridZ; z++) {{
-        const long long instance_id =
-            (long long)x * grid_yz + (long long)y * gridZ + z;
-        _TritonCpuTraceEntry *entry =
-            tracing ? &trace_entries[(size_t)instance_id] : nullptr;
-        if (entry != nullptr) {{
-          entry->start_ns = _triton_cpu_now_ns();
-          entry->thread_id = _triton_cpu_thread_id();
-          entry->cpu = _triton_cpu_current_cpu();
-        }}
-        // Use some random type "char" here.
-        {' '.join(f'StridedMemRefType<char, 0> ptr_arg{i} = {{static_cast<char *>(arg{i}), static_cast<char *>(arg{i}), 0}};' for i, ty in signature.items() if i not in constants and ty[0] == "*")}
-        {kernel_name}({kernel_parameters}
-                      gridX, gridY, gridZ, x, y, z);
-        if (entry != nullptr) {{
-          entry->end_ns = _triton_cpu_now_ns();
-        }}
-      }}
-    }}
-  }}
-
-  if (tracing) {{
-    _triton_cpu_write_trace(trace_path, trace_entries);
-  }}
+static int _launch(int gridX, int gridY, int gridZ{arg_decls}) {{
+  _KernelArgs kargs;
+  kargs.gridX = gridX;
+  kargs.gridY = gridY;
+  kargs.gridZ = gridZ;
+{args_init}
+  tcrt_launch_desc desc;
+  desc.abi_version = TCRT_ABI_VERSION;
+  desc.grid[0] = gridX;
+  desc.grid[1] = gridY;
+  desc.grid[2] = gridZ;
+  // Threads per program instance (metadata["cpu_threads"], see compiler.py).
+  desc.warps = {_CPU_THREADS_PLACEHOLDER};
+  desc.fn = _instance;
+  desc.args = &kargs;
+  // CSV timeline of the launch, see docs/05-Program-Instance-Parallelism.md.
+  desc.trace_path = getenv("TRITON_CPU_TRACE_FILE");
+  return tcrt_launch(&desc);
 }}
 
 typedef struct _DevicePtrInfo {{
@@ -382,7 +360,11 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
   // raise exception asap
   {get_ptr_checks_str};
-  _launch(gridX, gridY, gridZ, {launch_args_str});
+  if (_launch(gridX, gridY, gridZ{launch_args_str}) != 0) {{
+    PyErr_SetString(PyExc_RuntimeError,
+                    "triton-cpu-rt rejected the launch (runtime ABI mismatch?)");
+    return NULL;
+  }}
 
   if (PyErr_Occurred()) {{
     return NULL;
@@ -462,10 +444,27 @@ def compile_module(launcher_src, kernel_placeholder_name):
         # The cu_function parameter actually contains our kernel obj.
         # See CPUUtils.load_binary method.
         kernel_obj = cu_function
-        kernel_name = kernel_metadata[6]  # see pack_metadata in compiler.py
+        # See pack_metadata in compiler.py.
+        kernel_name = kernel_metadata[6]
+        cpu_threads = int(kernel_metadata[7]) if len(kernel_metadata) > 7 else 1
         src = launcher_src.replace(kernel_placeholder_name, kernel_name)
+        src = src.replace(_CPU_THREADS_PLACEHOLDER, str(max(cpu_threads, 1)))
 
-        key = hashlib.sha256(src.encode("utf-8") + kernel_obj).hexdigest()
+        sanitizer_type = _get_sanitizer_type()
+        if platform.system() == "Windows":
+            if sanitizer_type != "":
+                raise Exception(
+                    "Sanitizers are not supported on Windows with triton-shared."
+                )
+            # No shared runtime library on Windows: the runtime is compiled
+            # into every launcher (one pool per kernel signature).
+            runtime_key = hashlib.sha256(_runtime_source_bytes()).hexdigest()
+        else:
+            runtime_path, runtime_key = _get_runtime_library(sanitizer_type)
+
+        key = hashlib.sha256(
+            src.encode("utf-8") + kernel_obj + runtime_key.encode("utf-8")
+        ).hexdigest()
         cache = get_cache_manager(key)
         name = "__triton_shared_ref_cpu_kernel_launcher"
 
@@ -477,14 +476,7 @@ def compile_module(launcher_src, kernel_placeholder_name):
 
         if cache_path is None:
             with tempfile.TemporaryDirectory() as tmpdir:
-                sanitizer_type = _get_sanitizer_type()
-
                 if platform.system() == "Windows":
-                    if sanitizer_type != "":
-                        raise Exception(
-                            "Sanitizers are not supported on Windows with triton-shared."
-                        )
-
                     obj_path = os.path.join(tmpdir, "kernel.obj")
                     launcher_src_path = os.path.join(tmpdir, "main.cxx")
                     so_path = os.path.join(tmpdir, "kernel.pyd")
@@ -497,9 +489,11 @@ def compile_module(launcher_src, kernel_placeholder_name):
                             "/LD",
                             "/std:c++17",
                             launcher_src_path,
+                            str(_RUNTIME_DIR / "triton_cpu_rt.cpp"),
                             obj_path,
                             f"-I{py_include_dir}",
                             f"-I{include_dir}",
+                            f"-I{_RUNTIME_DIR}",
                             "/link",
                             f"/LIBPATH:{py_lib_dir}",
                             "/link",
@@ -514,92 +508,39 @@ def compile_module(launcher_src, kernel_placeholder_name):
                     Path(obj_path).write_bytes(kernel_obj)
                     Path(launcher_src_path).write_text(src)
 
-                    # Compile it together.
-                    if sanitizer_type != "":
-                        clang_path = _get_llvm_bin_path("clang++")
+                    if sanitizer_type != "" and not _sanitizer_available(
+                        sanitizer_type
+                    ):
+                        raise Exception(
+                            'Use LD_PRELOAD="path/to/libclang_rt.'
+                            + sanitizer_type
+                            + '.so" TRITON_SHARED_SANITIZER_TYPE='
+                            + sanitizer_type
+                            + " python ..."
+                        )
 
-                        subprocess_args = [
-                            clang_path,
-                            "-std=c++17",
-                            launcher_src_path,
-                            obj_path,
-                            f"-I{py_include_dir}",
-                            f"-I{include_dir}",
-                            f"-L{py_lib_dir}",
-                            "-shared",
-                            f"-l{py_lib}",
-                            "-fPIC",
-                            "-o",
-                            so_path,
-                        ]
-
-                        if not _sanitizer_available(sanitizer_type):
-                            raise Exception(
-                                'Use LD_PRELOAD="path/to/libclang_rt.'
-                                + sanitizer_type
-                                + '.so" TRITON_SHARED_SANITIZER_TYPE='
-                                + sanitizer_type
-                                + " python ..."
-                            )
-
-                        if sanitizer_type == "asan":
-                            subprocess_args.extend(
-                                ["-g", "-fsanitize=address", "-mllvm", "-asan-stack=0"]
-                            )
-                        elif sanitizer_type == "tsan":
-                            # ensure that openmp is available
-                            libomp_path = next(
-                                Path(Path(_get_llvm_bin_path("")).parent).rglob(
-                                    "libomp.so"
-                                ),
-                                None,
-                            )
-
-                            if not libomp_path:
-                                raise Exception("libomp.so does not exist.")
-
-                            libomp_path = str(libomp_path.parent)
-
-                            subprocess_args.extend(
-                                [
-                                    "-g",
-                                    "-fsanitize=thread",
-                                    "-fopenmp",
-                                    f"-Wl,-rpath,{libomp_path}",
-                                ]
-                            )
-
-                        subprocess.check_call(subprocess_args)
-                    else:
-                        subprocess_args = [
-                            "g++",
-                            "-std=c++17",
-                            launcher_src_path,
-                            obj_path,
-                            f"-I{py_include_dir}",
-                            f"-I{include_dir}",
-                            f"-L{py_lib_dir}",
-                            "-shared",
-                            f"-l{py_lib}",
-                            "-fPIC",
-                            "-o",
-                            so_path,
-                        ]
-                        try:
-                            # The launcher drives the launch grid with an OpenMP
-                            # parallel loop, see _launch in _generate_launcher.
-                            subprocess.check_call(subprocess_args + ["-fopenmp"])
-                        except subprocess.CalledProcessError:
-                            # Toolchains without OpenMP (e.g. Apple clang without
-                            # libomp) still build: the generated code guards the
-                            # parallel loop with `#if defined(_OPENMP)`, so the
-                            # launch grid is then traversed serially.
-                            print(
-                                "warning: launcher compilation with -fopenmp failed; "
-                                "program instances will be executed serially",
-                                file=sys.stderr,
-                            )
-                            subprocess.check_call(subprocess_args)
+                    # Compile it together.  The launcher links against the
+                    # shared CPU runtime; the rpath lets the dynamic loader find
+                    # it in the Triton cache.
+                    subprocess_args = [
+                        _cxx_for(sanitizer_type),
+                        "-std=c++17",
+                        launcher_src_path,
+                        obj_path,
+                        f"-I{py_include_dir}",
+                        f"-I{include_dir}",
+                        f"-I{_RUNTIME_DIR}",
+                        f"-L{py_lib_dir}",
+                        "-shared",
+                        f"-l{py_lib}",
+                        "-fPIC",
+                        runtime_path,
+                        f"-Wl,-rpath,{os.path.dirname(runtime_path)}",
+                        *_sanitizer_flags(sanitizer_type),
+                        "-o",
+                        so_path,
+                    ]
+                    subprocess.check_call(subprocess_args)
 
                 with open(so_path, "rb") as f:
                     cache_path = cache.put(f.read(), filename, binary=True)

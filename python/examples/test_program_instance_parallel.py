@@ -1,12 +1,13 @@
 """Program instance (launch grid) level parallelism of the CPU backend.
 
-The CPU launcher traverses the launch grid in parallel: one OpenMP worker per
-available CPU, and program instances are handed out dynamically.  These tests
-check that
+The CPU runtime (backend/runtime/triton_cpu_rt.*) executes the launch grid on
+a pool of worker threads, one per available CPU and pinned to it, and hands
+program instances out dynamically.  These tests check that
 
 * every program instance runs exactly once and receives the right program ids,
-* instances really overlap in time (recorded by the launcher's trace facility
+* instances really overlap in time (recorded by the runtime's trace facility
   through TRITON_CPU_TRACE_FILE, no kernel instrumentation needed),
+* every worker stays on its CPU,
 * TRITON_CPU_NUM_THREADS=1 gives a true serial baseline,
 * more workers actually reduce wall-clock time.
 
@@ -27,7 +28,7 @@ from triton.backends.triton_shared.driver import CPUDriver
 
 NUM_THREADS_ENV = "TRITON_CPU_NUM_THREADS"
 TRACE_FILE_ENV = "TRITON_CPU_TRACE_FILE"
-TRACE_HEADER = "instance,start_ns,end_ns,thread_id,cpu"
+TRACE_HEADER = "instance,start_ns,end_ns,thread_id,cpu,os_tid"
 
 # Elements per program instance in the busy kernel; kept small so that the
 # calibration below can tune the amount of work per instance.
@@ -85,7 +86,7 @@ def read_trace(path):
             line = line.strip()
             if not line:
                 continue
-            instance, start, end, thread_id, cpu = line.split(",")
+            instance, start, end, thread_id, cpu, _os_tid = line.split(",")
             rows.append((int(instance), int(start), int(end), int(thread_id), int(cpu)))
     return rows
 
@@ -177,6 +178,33 @@ def test_grid_parallel_overlap(backend, monkeypatch, tmp_path):
     span = max(row[2] for row in rows) - min(row[1] for row in rows)
     concurrency = busy / span
     assert concurrency > 1.5, f"achieved concurrency {concurrency:.2f}"
+
+
+def test_grid_workers_pinned(backend, monkeypatch, tmp_path):
+    """Each worker runs all of its instances on one CPU, workers on distinct CPUs."""
+    cpus = available_cpus()
+    if cpus < 2:
+        pytest.skip("program instance parallelism needs at least 2 CPUs")
+
+    monkeypatch.delenv(NUM_THREADS_ENV, raising=False)
+    trace_path = tmp_path / "trace_pinned.csv"
+    monkeypatch.setenv(TRACE_FILE_ENV, str(trace_path))
+
+    num_instances = 4 * cpus
+    iterations = calibrate_iterations(backend, target_seconds=0.002)
+    run_busy_kernel(backend, num_instances, iterations)
+
+    rows = read_trace(trace_path)
+    if any(row[4] < 0 for row in rows):
+        pytest.skip("the runtime cannot report the current CPU on this host")
+    cpus_of_worker = {}
+    for row in rows:
+        cpus_of_worker.setdefault(row[3], set()).add(row[4])
+    assert len(cpus_of_worker) >= 2, cpus_of_worker
+    for worker, worker_cpus in cpus_of_worker.items():
+        assert len(worker_cpus) == 1, f"worker {worker} migrated: {sorted(worker_cpus)}"
+    used = [next(iter(c)) for c in cpus_of_worker.values()]
+    assert len(set(used)) == len(used), f"two workers share a CPU: {cpus_of_worker}"
 
 
 def test_grid_parallel_serial_override(backend, monkeypatch, tmp_path):

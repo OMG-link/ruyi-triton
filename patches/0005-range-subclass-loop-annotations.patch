@@ -1,0 +1,27 @@
+diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
+index df09b3198e..aad8b68f57 100644
+--- a/python/triton/compiler/code_generator.py
++++ b/python/triton/compiler/code_generator.py
+@@ -1137,8 +1137,12 @@ class CodeGenerator(ast.NodeVisitor):
+         flatten = False
+         warp_specialize = False
+         disable_licm = False
+-        if IteratorClass is language.range:
++        # Backend-provided subclasses of `tl.range` may attach extra loop
++        # attributes through an `_annotate_loop(for_op, builder)` hook.
++        annotate_loop = None
++        if isinstance(IteratorClass, type) and issubclass(IteratorClass, language.range):
+             iterator = IteratorClass(*iter_args, **iter_kwargs)
++            annotate_loop = getattr(iterator, "_annotate_loop", None)
+             # visit iterator arguments
+             # note: only `range` iterator is supported now
+             # collect lower bound (lb), upper bound (ub), and step
+@@ -1209,6 +1213,8 @@ class CodeGenerator(ast.NodeVisitor):
+                 for_op.set_attr("tt.warp_specialize", self.builder.get_unit_attr())
+             if disable_licm:
+                 for_op.set_attr("llvm.loop_annotation", self.builder.get_disable_loop_licm_attr())
++            if annotate_loop is not None:
++                annotate_loop(for_op, self.builder)
+ 
+             self.scf_stack.append(node)
+             for_op_body = for_op.get_body(0)

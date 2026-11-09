@@ -2229,9 +2229,51 @@ public:
   }
 };
 
+// Scalar tt.extern_elementwise with a symbol that has no MLIR equivalent
+// (e.g. the CPU runtime queries behind triton.language.extra.cpu): becomes a
+// call to an external function `symbol`, declared in the module and resolved
+// when the kernel object is linked.  Tensor operands/results are not
+// supported.
+class ExternElementwiseScalarCallConverter
+    : public OpConversionPattern<triton::ExternElementwiseOp> {
+  using OpConversionPattern<triton::ExternElementwiseOp>::OpConversionPattern;
+
+public:
+  LogicalResult
+  matchAndRewrite(triton::ExternElementwiseOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (isa<ShapedType>(op.getType()) ||
+        llvm::any_of(adaptor.getSrcs(), [](Value v) {
+          return isa<ShapedType>(v.getType());
+        }))
+      return failure();
+    StringRef symbol = op.getSymbol();
+    if (symbol.empty() || symbol.starts_with("__nv_"))
+      return failure();
+
+    auto module = op->getParentOfType<ModuleOp>();
+    auto fnType = rewriter.getFunctionType(
+        ValueRange(adaptor.getSrcs()).getTypes(), op.getType());
+    auto callee = module.lookupSymbol<func::FuncOp>(symbol);
+    if (!callee) {
+      if (module.lookupSymbol(symbol))
+        return failure();
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(module.getBody());
+      callee = rewriter.create<func::FuncOp>(op.getLoc(), symbol, fnType);
+      callee.setPrivate();
+    } else if (callee.getFunctionType() != fnType) {
+      return failure();
+    }
+    rewriter.replaceOpWithNewOp<func::CallOp>(op, callee, adaptor.getSrcs());
+    return success();
+  }
+};
+
 static void populateExternElementwiseOpToMLIROps(RewritePatternSet &patterns) {
   patterns.add<ExternElementwiseBinaryOpConverter,
-               ExternElementwiseUnaryOpConverter>(patterns.getContext());
+               ExternElementwiseUnaryOpConverter,
+               ExternElementwiseScalarCallConverter>(patterns.getContext());
 }
 
 } // namespace

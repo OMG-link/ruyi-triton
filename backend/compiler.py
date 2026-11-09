@@ -77,6 +77,69 @@ def _is_qgemm_opt_enabled():
     return val.lower() in ("1", "true")
 
 
+# ----------------------- Threads per program instance -----------------------
+# `num_warps` is the number of threads of a program instance:
+#   * num_warps > 0: used as is.
+#   * num_warps = 0: inferred by _infer_num_warps().
+# The resolved value is stored in metadata["num_warps"].  Loops marked with
+# `triton.language.extra.cpu.parallel` are distributed over that many threads
+# (buddy-mlir --cpar-distribute-loops / --cpar-outline-to-runtime).  The
+# runtime reserves cores for the threads only if the kernel actually contains
+# a parallel region (metadata["cpu_threads"], see pack_metadata).
+
+# Symbol of the fork/join entry point of the CPU runtime (backend/runtime).
+_CPAR_RUNTIME_SYMBOL = "__cpar_parallel"
+
+
+def _l2_domain_size(cpu: int, available) -> int:
+    """Number of available CPUs sharing the L2 cache (or cluster) of `cpu`."""
+    base = f"/sys/devices/system/cpu/cpu{cpu}"
+
+    def parse(text):
+        cpus = set()
+        for item in text.strip().split(","):
+            if not item:
+                continue
+            first, _, last = item.partition("-")
+            cpus.update(range(int(first), int(last or first) + 1))
+        return cpus
+
+    try:
+        for index in sorted(Path(base, "cache").glob("index*")):
+            if (index / "level").read_text().strip() == "2":
+                return len(parse((index / "shared_cpu_list").read_text()) & available)
+        return len(parse(Path(base, "topology", "cluster_cpus_list").read_text()) & available)
+    except (OSError, ValueError):
+        return 0
+
+
+@functools.lru_cache()
+def _infer_num_warps() -> int:
+    """Placeholder inference of the threads per program instance (num_warps=0).
+
+    Uses the number of CPUs sharing the L2 cache of the first available CPU,
+    i.e. one full cluster per program instance (4 on the SpacemiT K1), so
+    that the threads of an instance share an L2.  Falls back to 1.
+
+    TODO: replace by an inference based on the kernel (work per instance,
+    grid size, memory footprint).
+    """
+    try:
+        available = set(os.sched_getaffinity(0))
+    except AttributeError:  # pragma: no cover - non-Linux
+        return 1
+    if not available:
+        return 1
+    return max(1, _l2_domain_size(min(available), available))
+
+
+def _resolve_num_warps(num_warps) -> int:
+    num_warps = int(num_warps or 0)
+    if num_warps < 0:
+        raise ValueError(f"num_warps must be >= 0, got {num_warps}")
+    return num_warps if num_warps > 0 else _infer_num_warps()
+
+
 def _build_ttsharedir_passes():
     passes = []
 
@@ -191,7 +254,7 @@ def _optimize_llir(llir: str):
     #     return Path(lliropt_path).read_text()
     return llir
 
-def _ttsharedir_to_vectorir(ttsharedir: str):
+def _ttsharedir_to_vectorir(ttsharedir: str, num_threads: int):
     with tempfile.TemporaryDirectory() as tmpdir:
         ttshared_path = os.path.join(tmpdir, "ttshared.mlir")
         vector_path = os.path.join(tmpdir, "vector.mlir")
@@ -211,8 +274,16 @@ def _ttsharedir_to_vectorir(ttsharedir: str):
             # We disable this pass for now since performance on CPU isn't the main
             # focus at the moment.
             # "--eliminate-empty-tensors",
+            # Loops marked by cpu.parallel are distributed over num_threads
+            # threads.  This has to happen on tensors: the distributed loop is
+            # an scf.forall, which bufferization treats as a parallel region,
+            # so every thread gets private buffers for what it writes.
+            f"--cpar-distribute-loops=num-threads={num_threads}",
             "--empty-tensor-to-alloc-tensor",
             "--one-shot-bufferize=allow-return-allocs-from-loops=true",
+            # The foralls become cpar.parallel regions (outlined in
+            # _vectorir_to_llir).
+            "--cpar-forall-to-parallel",
             "--lower-linalg-to-vir",
             "--lower-vir-to-vector=vector-width=4",
             "--convert-linalg-to-affine-loops",
@@ -276,6 +347,9 @@ def _vectorir_to_llir(vectorir: str):
                 "--convert-arith-to-llvm",
                 # Remove all unrealized casts created
                 "--reconcile-unrealized-casts",
+                # Outline cpar.parallel regions into functions called through
+                # the runtime's __cpar_parallel (needs pure LLVM dialect).
+                "--cpar-outline-to-runtime",
                 "--mlir-print-debuginfo",
                 "-o",
                 llmlir_path,
@@ -289,6 +363,18 @@ def _vectorir_to_llir(vectorir: str):
         )
         _dump_ir_if_needed([llmlir_path, llir_path])
         return Path(llir_path).read_text()
+
+
+def _record_cpu_threads(llir: str, metadata):
+    """Threads the runtime reserves per program instance.
+
+    num_warps if the kernel forks parallel regions, 1 otherwise: a kernel
+    without parallel region would leave the other cores of its slot idle.
+    """
+    forks = re.search(rf"\bcall void @{_CPAR_RUNTIME_SYMBOL}\(", llir) is not None
+    metadata["cpu_threads"] = metadata["num_warps"] if forks else 1
+    return llir
+
 
 def _llir_to_bin(llir: str, metadata):
     pattern = r"define void @(\w+)\(.+"
@@ -414,9 +500,9 @@ class CPUBackend(BaseBackend):
         return codegen_fns
 
     def pack_metadata(self, metadata):
-        # Note: We actually don't need any of these except for the name which is
-        # used in the launch function in driver.py. Putting these in so we're
-        # consistent with other backends
+        # The launch function in driver.py uses the name (index 6) and the
+        # threads per program instance (index 7).  The other entries are kept
+        # for consistency with the other backends.
         return (
             metadata.num_warps,
             metadata.num_ctas,
@@ -425,6 +511,7 @@ class CPUBackend(BaseBackend):
             metadata.cluster_dims[1],
             metadata.cluster_dims[2],
             metadata.name,
+            getattr(metadata, "cpu_threads", 1),
         )
 
     # Our compilation pipeline isn't in python like nvidia or amd, no need to load
@@ -450,12 +537,27 @@ class CPUBackend(BaseBackend):
         pm.run(mod)
         return mod
 
+    @staticmethod
+    def _num_threads(metadata):
+        # Resolved once per compilation; also covers compilations that start
+        # from an IR file and skip make_ttir.
+        metadata["num_warps"] = _resolve_num_warps(metadata.get("num_warps", 0))
+        return metadata["num_warps"]
+
     def add_stages(self, stages, options, language):
-        stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
+        def ttir(src, metadata):
+            self._num_threads(metadata)
+            return self.make_ttir(src, metadata, options)
+
+        stages["ttir"] = ttir
         stages["ttsharedir"] = lambda src, metadata: _ttir_to_ttsharedir(src)
         stages["ttsharedir.opt"] = lambda src, metadata: _optimize_ttsharedir(src)
-        stages["vectorir"] = lambda src, metadata: _ttsharedir_to_vectorir(src)
-        stages["llir"] = lambda src, metadata: _vectorir_to_llir(src)
+        stages["vectorir"] = lambda src, metadata: _ttsharedir_to_vectorir(
+            src, self._num_threads(metadata)
+        )
+        stages["llir"] = lambda src, metadata: _record_cpu_threads(
+            _vectorir_to_llir(src), metadata
+        )
         stages["llir.opt"] = lambda src, metadata: _optimize_llir(src)
         stages["obj"] = lambda src, metadata: _llir_to_bin(src, metadata)
 

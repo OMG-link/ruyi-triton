@@ -2,109 +2,146 @@
 
 The CPU backend used to traverse the launch grid with a plain three level
 `for` loop in the generated launcher, i.e. every program instance was executed
-one after the other.  The launcher now executes the grid in parallel; this
-document describes the mechanism, the knobs it exposes and how the behaviour is
-verified.
+one after the other.  The grid is now executed in parallel by a small CPU
+runtime that owns a pool of worker threads; this document describes the
+mechanism, the knobs it exposes and how the behaviour is verified.
 
 ## Where it lives
 
-Everything is in `backend/driver.py`:
+| File | Role |
+|---|---|
+| `backend/runtime/triton_cpu_rt.h` | C ABI between launchers and the runtime (`tcrt_launch`, topology queries). |
+| `backend/runtime/triton_cpu_rt.cpp` | Topology detection, worker pool, grid scheduling, trace. |
+| `backend/driver.py` | Builds the runtime library, generates and builds the per-signature launcher. |
 
-* `_generate_launcher()` emits the C++ launcher source, including `_launch()`.
-* `_launch()` traverses `gridX * gridY * gridZ` program instances with an
-  OpenMP `parallel for collapse(3)` loop.
-* `compile_module()` compiles the launcher with `g++ -fopenmp` on the machine
-  that executes the kernel.
+The generated launcher no longer contains any scheduling code.  It packs the
+kernel arguments into a struct, provides a per instance entry point
+`_instance(args, x, y, z)` and hands both to `tcrt_launch()`.
 
-No Triton compiler change is involved: `num_warps` and the metadata are already
-available at the Python level (`CPUOptions`, `pack_metadata()`), and the
-launcher is generated and compiled at run time.  Consequently a change to the
-parallelism only requires syncing `backend/driver.py` to the target.
+No Triton compiler change is involved: the runtime and the launcher are built
+at run time on the machine that executes the kernels.  A change to the
+parallelism only requires syncing `backend/driver.py` and `backend/runtime/`
+to the target.
+
+## One runtime per process
+
+Triton builds one launcher extension per kernel signature.  If the worker
+pool lived in the launcher, every signature would come with its own pool.  The
+runtime is therefore a separate shared library:
+
+* `driver.py` compiles `triton_cpu_rt.cpp` on first use
+  (`g++ -O2 -std=c++17 -fPIC -shared -pthread`, plus the sanitizer flags when
+  `TRITON_SHARED_SANITIZER_TYPE` is set) and stores it in the Triton cache.
+* The file name and the soname are `libtriton_cpu_rt.<hash>.so`, where the hash
+  covers the sources and the compile command.  The dynamic loader identifies
+  libraries by soname, so two different builds can never be merged into one.
+* Launchers link against that file with an rpath to its cache directory, and
+  their cache key includes the runtime hash.
+
+The result is a single pool per process, however many kernels are launched.
+On Windows (not a target platform) there is no shared library: the runtime is
+compiled into every launcher.
+
+## Worker pool
+
+* **Topology.** The runtime takes the CPUs available to the process
+  (`sched_getaffinity`, so `taskset`/cgroup restrictions are honoured) and
+  groups them into *domains* of CPUs that share an L2 cache:
+  `cpuN/cache/index*/shared_cpu_list` of the level 2 cache, falling back to
+  `cpuN/topology/cluster_cpus_list`, falling back to a single domain.
+  `TRITON_CPU_CLUSTERS="0-3;4-7"` overrides the detection.  On the K1 both
+  sysfs sources give the two clusters `0-3` and `4-7`.
+* **Workers.** The first launch that needs more than one worker creates one
+  thread per available CPU.  Every worker is pinned to its CPU when it is
+  created (`pthread_attr_setaffinity_np`) and never migrates afterwards.
+  Asynchronous signals are blocked in workers, so they keep going to the
+  application threads (the Python main thread).
+* **The calling thread is not a worker.** It is never pinned and only waits for
+  the launch to finish, so launching a kernel does not change the scheduling of
+  the Python thread or of other libraries running on it (e.g. torch).
+* **Scheduling.** The caller posts the grid to P workers.  Each worker grabs the
+  next program instance from a shared atomic counter, which is the equivalent
+  of `schedule(dynamic, 1)`: program instances do not all cost the same, and the
+  K1's two clusters do not run at the same speed, so a static split would leave
+  a long tail.  The flattening of the grid is unchanged (`x` outer, `z` inner).
+* **Choice of workers.** Workers are taken round robin over the domains, so a
+  launch with fewer instances than CPUs spreads over all clusters.
+* **Waiting.** Idle workers wait on a per-worker mailbox and the caller waits on
+  a completion latch.  Both spin for `TRITON_CPU_SPIN` iterations and then
+  sleep on a futex.
 
 ## Number of concurrent program instances
 
-`_triton_cpu_num_worker_threads()` decides how many program instances run at
-the same time:
+`P = min(available CPUs, TRITON_CPU_NUM_THREADS if > 0, number of instances)`.
 
-1. `TRITON_CPU_NUM_THREADS` if set to a value `> 0`,
-2. otherwise `omp_get_num_procs()` (which follows the CPU affinity mask),
-3. otherwise `sched_getaffinity()` on Linux,
-4. and finally the number of program instances itself (a grid with fewer
-   instances than CPUs never starts more workers than it has work for).
+If `P == 1` (single CPU, a single instance, or `TRITON_CPU_NUM_THREADS=1`), the
+grid runs on the calling thread and the pool is not involved at all.
 
-The result is passed to the loop as an explicit `num_threads(...)` clause, so
-`OMP_NUM_THREADS` has no effect on the number of workers.  `if (nthreads > 1)`
-serializes the region for small launches (including `grid == 1`, which keeps the
-single instance case completely free of any OpenMP team setup).
-
-`schedule(dynamic, 1)` is used on purpose: program instances do not all cost the
-same amount of time, and the SpacemiT K1 has two clusters with different cores,
-so a static split would leave a long tail.
+`TRITON_CPU_NUM_THREADS` is now capped at the number of available CPUs: there
+is exactly one worker per CPU, so asking for more cannot create more
+concurrency.
 
 ## Knobs
 
 | Environment variable | Meaning |
 |---|---|
-| `TRITON_CPU_NUM_THREADS` | Maximum number of program instances executed concurrently. `0`/unset means "one per available CPU". Used by the tests to obtain a serial baseline. |
-| `TRITON_CPU_TRACE_FILE` | If set, the launcher writes one CSV line per program instance: `instance,start_ns,end_ns,thread_id,cpu`. Debug/test facility only: when unset the launcher does a single `getenv()`. |
+| `TRITON_CPU_NUM_THREADS` | Maximum number of program instances executed concurrently. `0`/unset means "one per available CPU". Used by the tests to obtain a serial baseline. Read at every launch. |
+| `TRITON_CPU_TRACE_FILE` | If set, the runtime writes one CSV line per program instance: `instance,start_ns,end_ns,thread_id,cpu,os_tid` (and `<file>.threads` for parallel regions, see document 06). Debug/test facility only. Read at every launch. |
+| `TRITON_CPU_CLUSTERS` | Overrides the domain detection, e.g. `0-3;4-7`. CPUs it does not mention form their own domains. Read when the pool is created. |
+| `TRITON_CPU_SPIN` | Spin iterations before a waiting thread sleeps (default `4000`). Higher values lower the wake-up latency of back-to-back launches and burn more CPU while idle. Read when the pool is created. |
 
-`cpu` is `-1` on non-Linux hosts (no `sched_getcpu()`).
+In the trace, `thread_id` is the rank of the worker within the launch (`0` for
+the calling thread when `P == 1`) and `os_tid` its Linux thread id.  `cpu` is `sched_getcpu()` at instance start,
+or `-1` on non-Linux hosts.  `start_ns`/`end_ns` come from
+`std::chrono::steady_clock`.  Every instance writes its own slot, so recording
+needs no synchronization, and the file is written after the grid finished.
 
-The trace is written after the loop finishes, into the slot owned by each
-instance, so recording needs no synchronization.  `thread_id` is the OpenMP
-thread number of the worker that executed the instance, `start_ns`/`end_ns` come
-from `std::chrono::steady_clock`.
+OpenMP is no longer involved: `OMP_NUM_THREADS`, `OMP_PROC_BIND`, `OMP_PLACES`
+and friends have no effect on the launcher.
 
-## Toolchains without OpenMP
+## Process lifecycle
 
-The parallel loop is guarded with `#if defined(_OPENMP)`.  If the launcher
-compilation with `-fopenmp` fails (for example Apple clang without `libomp`),
-`compile_module()` retries without the flag and prints a warning: the grid is
-then traversed serially, everything else keeps working.
-
-## Interplay with OpenMP environment variables
-
-* `TRITON_CPU_NUM_THREADS` wins over `OMP_NUM_THREADS` because the worker count
-  is passed as an explicit `num_threads(...)` clause.
-* `OMP_PROC_BIND` / `OMP_PLACES` / `OMP_WAIT_POLICY` still influence the
-  libgomp runtime, i.e. how the workers are placed and how they wait.
-* A Triton launch performed from inside a user OpenMP parallel region is a
-  nested region.  Nested parallelism is disabled by default, so such a launch
-  is executed serially unless the application sets
-  `OMP_MAX_ACTIVE_LEVELS`/`omp_set_max_active_levels()`.
+* `fork()`: in the child the pool is forgotten (its threads do not exist
+  there) and rebuilt on first use.  `pthread_atfork` also makes sure no launch
+  is in flight while a process forks.
+* Exit: workers are detached threads sleeping on a futex; they do not delay
+  `exit()`.
+* Launches from several application threads are serialized by a lock inside
+  the runtime.  The generated launcher currently holds the GIL during the
+  launch anyway.
 
 ## Semantics
 
 Program instances are independent by definition of the Triton programming
 model (there is no synchronization between them), so executing them in any
 order, concurrently, produces the same result as the previous serial traversal.
-The traversal order of the flattened loop is unchanged (`x` outer, `z` inner).
 
-Two limitations are worth knowing:
-
-* `num_warps` is still ignored by the runtime.  Program instances run on a
-  single thread each; per-instance warp threads (and the cluster affinity that
-  comes with them) are the next step.  The worker budget above is where that
-  will plug in: the number of concurrent instances has to shrink accordingly.
-* All program instances still share the process' main memory.  Nothing in this
-  change tries to place them on the same cluster / L2 yet.
+All program instances still share the process' main memory.  Running several
+threads per program instance on one cluster (`tcrt_launch_desc::warps`,
+`num_warps`) builds on the domains and the pinned workers introduced here, see
+[06-Program-Instance-Threads.md](06-Program-Instance-Threads.md).  With
+`warps = 1` (the default for kernels without `cpu.parallel` loop) the behaviour
+described in this document is unchanged.
 
 ## Verification
 
 `python/examples/test_program_instance_parallel.py` covers this feature:
 
-* `test_grid_parallel_coverage` – every instance runs exactly once and gets the
+* `test_grid_parallel_coverage`: every instance runs exactly once and gets the
   program ids of its grid slot, both for 1D and 3D grids (this also pins the
   flattening of `x`/`y`/`z`).
-* `test_grid_parallel_overlap` – a busy kernel runs on `2 * ncpu` instances while
-  `TRITON_CPU_TRACE_FILE` records the instance timeline.  The test asserts that
-  (a) more than one launcher thread was used, (b) at least one pair of
-  instances interleaves (`a.start < b.start < a.end < b.end`) - impossible for a
-  serial traversal - and (c) the achieved concurrency `sum(end - start) / span`
-  is above 1.5.
-* `test_grid_parallel_serial_override` – `TRITON_CPU_NUM_THREADS=1` yields one
+* `test_grid_parallel_overlap`: a busy kernel runs on `2 * ncpu` instances while
+  `TRITON_CPU_TRACE_FILE` records the instance timeline.  The test asserts three
+  things:
+  * more than one worker was used;
+  * at least one pair of instances interleaves (`a.start < b.start < a.end < b.end`),
+    which is impossible for a serial traversal;
+  * the achieved concurrency `sum(end - start) / span` is above 1.5.
+* `test_grid_workers_pinned`: every worker runs all of its instances on a
+  single CPU, and no two workers share a CPU.
+* `test_grid_parallel_serial_override`: `TRITON_CPU_NUM_THREADS=1` yields one
   thread, no interleaving, and still correct results.
-* `test_grid_parallel_speedup` – wall-clock speedup of the parallel run over the
+* `test_grid_parallel_speedup`: wall-clock speedup of the parallel run over the
   serial baseline (skipped on machines with a single CPU).
 
 Run it on the target with:
@@ -117,39 +154,10 @@ pytest -q test_program_instance_parallel.py -s
 
 ## Measured on the SpacemiT K1
 
-K1: 8 cores in two clusters (`cpu0-3` → cluster 0, `cpu4-7` → cluster 1),
-`nproc = 8`, `g++ 13.2` with `libgomp` available.
+K1: 8 cores in two clusters (`cpu0-3` → cluster 0, `cpu4-7` → cluster 1, each
+cluster with its own L2), `nproc = 8`.
 
-```
-$ pytest -q test_program_instance_parallel.py -s
-...serial=279.28ms parallel=40.23ms speedup=6.94x (8 cpus)
-.
-4 passed in 19.94s
-```
-
-The trace of the busy kernel on 16 program instances shows the expected
-picture (one instance per `start_ns`/`end_ns` interval):
-
-```
-cpus=8 instances=16 iterations=10968
-parallel: threads=[0, 1, 2, 3, 4, 5, 6, 7]
-parallel: cpus=[0, 1, 2, 3, 4, 5, 6, 7]
-parallel: concurrency=7.51 interleaved_pairs=58
-serial:   threads=[0] cpus=[0]
-serial:   concurrency=1.00 interleaved_pairs=0
-```
-
-i.e. the 8 workers are spread over all cores of both clusters, their intervals
-interleave heavily (`58` interleaved pairs - impossible for a serial traversal)
-and `sum(duration) / span` reaches `7.51` of the theoretical `8`.  The
-`TRITON_CPU_NUM_THREADS=1` baseline stays on a single thread and yields no
-interleaving at all.
-
-Wall clock of the complete test file: ~20 s on the K1 (dominated by kernel
-compilation and calibration).
-
-Existing kernels are unaffected by the parallel traversal: `test_vec_add.py`,
-`test_reduce.py`, `test_softmax.py` (which passes `num_warps`),
-`test_mask_loop_iter_arg.py`, `test_scalar_store.py`, `test_matmul.py`,
-`test_mm.py`, `test_mask.py` and `test_addptr.py` (77 tests) pass on the K1 with
-the parallel launcher.
+TODO: re-run on the K1 with the runtime based implementation and record the
+output of `pytest -q test_program_instance_parallel.py -s` here.  The numbers
+previously recorded here were obtained with the OpenMP based launcher
+(6.94x speedup, concurrency 7.51 on 16 instances).
