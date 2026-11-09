@@ -15,6 +15,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Ptr/IR/PtrTypes.h"
 #include "mlir/IR/Builders.h"
@@ -131,7 +132,12 @@ struct ToMemrefConverter : public OpRewritePattern<UnrealizedConversionCastOp> {
       auto ptrToMemref = rewriter.create<tptr::ToMemrefOp>(
           op->getLoc(), MemRefType::get({1}, elemType), input);
 
-      SmallVector<OpFoldResult> sizes = {rewriter.getIndexAttr(1)};
+      // The size of the dynamic result dimension has to be an operand: a
+      // static size with a dynamic result type makes memref.dim folding
+      // assert (e.g. a gather from a tt.int_to_ptr base).
+      SmallVector<OpFoldResult> sizes = {
+          rewriter.create<arith::ConstantIndexOp>(op->getLoc(), 1)
+              .getResult()};
       SmallVector<OpFoldResult> newStrides = {rewriter.getIndexAttr(1)};
       auto newUnrankedMemref = rewriter.create<memref::ReinterpretCastOp>(
           op->getLoc(), MemRefType::get({ShapedType::kDynamic}, elemType),
@@ -151,7 +157,8 @@ class ReconcilePtrCastsPass
 
 public:
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<tptr::TPtrDialect, memref::MemRefDialect, BuiltinDialect>();
+    registry.insert<arith::ArithDialect, tptr::TPtrDialect,
+                    memref::MemRefDialect, BuiltinDialect>();
   }
 
   void runOnOperation() override {

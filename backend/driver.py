@@ -111,6 +111,8 @@ def _get_runtime_library(sanitizer_type):
                     soname,
                     "-o",
                     out_path,
+                    # dlopen of libspine_tcm (TCM of the SpacemiT K3).
+                    *(["-ldl"] if platform.system() == "Linux" else []),
                 ]
             )
             path = cache.put(Path(out_path).read_bytes(), name, binary=True)
@@ -360,7 +362,14 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
   // raise exception asap
   {get_ptr_checks_str};
-  if (_launch(gridX, gridY, gridZ{launch_args_str}) != 0) {{
+  const int _rc = _launch(gridX, gridY, gridZ{launch_args_str});
+  if (_rc == TCRT_ERROR_NO_TCM) {{
+    PyErr_SetString(PyExc_RuntimeError,
+                    "cpu.alloc buffers could not be put in the TCM "
+                    "(TRITON_CPU_TCM=require; see the triton-cpu-rt warnings)");
+    return NULL;
+  }}
+  if (_rc != 0) {{
     PyErr_SetString(PyExc_RuntimeError,
                     "triton-cpu-rt rejected the launch (runtime ABI mismatch?)");
     return NULL;

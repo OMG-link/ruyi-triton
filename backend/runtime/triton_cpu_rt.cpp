@@ -39,6 +39,7 @@
 #include <atomic>
 #include <chrono>
 #include <climits>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -46,11 +47,14 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 #if defined(__linux__)
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <linux/futex.h>
 #include <pthread.h>
@@ -484,7 +488,7 @@ struct RegionTask {
   int region = -1;
 };
 
-enum class MessageKind { Grid, Region };
+enum class MessageKind { Grid, Region, TcmRelease };
 
 struct alignas(64) Worker {
   int cpu = -1;
@@ -498,15 +502,27 @@ struct alignas(64) Worker {
   Slot *slot = nullptr;      // Grid: slot led by this worker
   RegionTask *task = nullptr; // Region
   int member = 0;            // Region: index of this worker in the slot
+  Latch *released = nullptr; // TcmRelease
   // Region records of this worker during the current launch.  Cleared by the
   // dispatcher before the launch, read by it after the launch.
   std::vector<RegionTraceEntry> regionTrace;
+  // cpu.alloc buffers (see "TCM" below), set up by the worker itself on first
+  // use: `tcm` is the TCM block `tcmBlock` owned by the worker, or ordinary
+  // memory (`tcmBlock` < 0).  Only the worker writes these.
+  bool onAiCore = false; // pinned to an AI core (pool in AI mode)
+  bool tcmReady = false;
+  int tcmBlock = -1;
+  void *tcm = nullptr;
+  size_t tcmBytes = 0; // usable size of `tcm`
 };
 
 // CPUs of one domain that run one program instance at a time.
 struct Slot {
   std::vector<Worker *> members; // members[0] is the leader
   Latch regionDone;
+  // The leader checked that the slot's CPUs are next to its TCM block (see
+  // triton_cpu_tcm_base_shared).  Only the leader touches it.
+  bool tcmChecked = false;
 };
 
 struct Pool {
@@ -524,6 +540,8 @@ struct Pool {
   // domains, so that a launch with fewer instances than slots spreads over
   // all clusters.  Built on first use and kept for the lifetime of the pool.
   std::map<int, std::vector<Slot *>> layouts;
+  // Counts the workers that released their TCM block at exit.
+  Latch tcmReleased;
 };
 
 thread_local Worker *tlsWorker = nullptr;
@@ -536,6 +554,287 @@ thread_local bool tlsTracing = false;
 thread_local int64_t tlsInstance = -1;
 thread_local int tlsRegionCount = 0;
 thread_local std::vector<RegionTraceEntry> *tlsRegionSink = nullptr;
+
+//===----------------------------------------------------------------------===//
+// TCM (SpacemiT K3): buffers of triton.language.extra.cpu.alloc
+//===----------------------------------------------------------------------===//
+//
+// Compiled kernels get the base of their cpu.alloc buffers from
+// triton_cpu_tcm_base(bytes) (buddy-mlir --cpu-tcm-assign), called by the
+// thread that executes the allocation.  On the AI cores every worker uses the
+// TCM block next to its core (cpu_affinity_mask), acquired exclusively with
+// spine_tcm_mem_try_wait() by the worker itself on first use and released by
+// it at exit (the library only accepts a release from the acquiring thread).
+// Everywhere else, and when the block is taken by another process, the
+// buffers are in ordinary memory of the thread.  TRITON_CPU_TCM=0 always uses
+// ordinary memory, TRITON_CPU_TCM=require makes launches fail instead.
+//
+// libspine_tcm is loaded with dlopen, so the runtime does not depend on it.
+// The X100 cores do not write the TCM reliably and are never given a block.
+
+constexpr size_t kTcmAlign = 128;
+constexpr size_t kDefaultTcmBytes = 384 * 1024;
+
+enum class TcmMode { Off, Auto, Require };
+
+TcmMode tcmMode() {
+  const char *env = std::getenv("TRITON_CPU_TCM");
+  if (env != nullptr && std::strcmp(env, "0") == 0)
+    return TcmMode::Off;
+  if (env != nullptr && std::strcmp(env, "require") == 0)
+    return TcmMode::Require;
+  return TcmMode::Auto;
+}
+
+// Set when a buffer could not be put in the TCM with TRITON_CPU_TCM=require;
+// reported by tcrt_launch.
+std::atomic<bool> gTcmRequireFailed{false};
+
+std::atomic<bool> warnedTcmLib{false};
+std::atomic<bool> warnedTcmBusy{false};
+std::atomic<bool> warnedTcmStale{false};
+std::atomic<bool> warnedTcmSize{false};
+std::atomic<bool> warnedTcmShared{false};
+
+void warnOncef(std::atomic<bool> &flag, const char *format, ...) {
+  if (flag.exchange(true))
+    return;
+  char message[512];
+  va_list args;
+  va_start(args, format);
+  std::vsnprintf(message, sizeof(message), format, args);
+  va_end(args);
+  std::fprintf(stderr, "triton-cpu-rt: warning: %s\n", message);
+}
+
+// Mirrors of the structs of spine_tcm.h (spacemit-tcm 3.x).
+struct SpineTcmMemInfo {
+  size_t blkSize;
+  size_t blkNum;
+  int isFakeTcm;
+};
+struct SpineTcmBlockInfo {
+  int id;
+  void *va;
+  size_t size;
+  uint64_t physAddr;
+  uint64_t cpuAffinityMask;
+  int ownerTid;
+  int isAcquired;
+};
+
+struct TcmLib {
+  bool ok = false;
+  int (*isAvailable)(void) = nullptr;
+  int (*layoutInfo)(SpineTcmMemInfo *) = nullptr;
+  int (*memInfo)(int, SpineTcmBlockInfo *) = nullptr;
+  void *(*tryWait)(int, size_t) = nullptr;
+  int (*release)(int) = nullptr;
+  int (*forceRelease)(int) = nullptr;
+  size_t blockBytes = 0;
+  std::vector<SpineTcmBlockInfo> blocks;
+};
+
+// The library, loaded on first use.
+const TcmLib &tcmLib() {
+  static TcmLib lib;
+  static std::once_flag once;
+  std::call_once(once, [] {
+#if defined(__linux__)
+    void *handle = dlopen("libspine_tcm.so", RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr)
+      handle = dlopen("libspine_tcm.so.3", RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr)
+      return;
+    auto sym = [&](auto &fn, const char *name) {
+      fn = reinterpret_cast<std::remove_reference_t<decltype(fn)>>(
+          dlsym(handle, name));
+      return fn != nullptr;
+    };
+    if (!sym(lib.isAvailable, "spine_tcm_runtime_is_available") ||
+        !sym(lib.layoutInfo, "spine_tcm_runtime_layout_info") ||
+        !sym(lib.memInfo, "spine_tcm_runtime_mem_info") ||
+        !sym(lib.tryWait, "spine_tcm_runtime_mem_try_wait") ||
+        !sym(lib.release, "spine_tcm_runtime_mem_release") ||
+        !sym(lib.forceRelease, "spine_tcm_runtime_mem_force_release"))
+      return;
+    SpineTcmMemInfo info{};
+    if (lib.isAvailable() != 1 || lib.layoutInfo(&info) != 0 ||
+        info.isFakeTcm != 0 || info.blkNum == 0 || info.blkSize == 0)
+      return;
+    for (size_t id = 0; id < info.blkNum; ++id) {
+      SpineTcmBlockInfo block{};
+      if (lib.memInfo(static_cast<int>(id), &block) != 0)
+        return;
+      lib.blocks.push_back(block);
+    }
+    lib.blockBytes = info.blkSize;
+    lib.ok = true;
+#endif
+  });
+  return lib;
+}
+
+// Block of the TCM next to `cpu`: among the blocks whose affinity mask
+// contains `cpu`, the one at the rank of `cpu` within the mask (on the K3 two
+// cores share two blocks: the lower core gets the lower block).
+int tcmBlockFor(const TcmLib &lib, int cpu) {
+  if (cpu < 0 || cpu >= 64)
+    return -1;
+  std::vector<int> candidates;
+  uint64_t mask = 0;
+  for (const SpineTcmBlockInfo &block : lib.blocks) {
+    if ((block.cpuAffinityMask >> cpu) & 1) {
+      candidates.push_back(block.id);
+      mask = block.cpuAffinityMask;
+    }
+  }
+  if (candidates.empty())
+    return -1;
+  int rank = 0;
+  for (int lower = 0; lower < cpu; ++lower)
+    rank += static_cast<int>((mask >> lower) & 1);
+  return candidates[static_cast<size_t>(rank) % candidates.size()];
+}
+
+uint64_t tcmBlockMask(int block) {
+  const TcmLib &lib = tcmLib();
+  if (block < 0 || static_cast<size_t>(block) >= lib.blocks.size())
+    return 0;
+  return lib.blocks[block].cpuAffinityMask;
+}
+
+bool threadExists(int tid) {
+#if defined(__linux__)
+  // /proc/<tid> exists for every thread, not only for thread group leaders.
+  return tid > 0 && access(("/proc/" + std::to_string(tid)).c_str(), F_OK) == 0;
+#else
+  (void)tid;
+  return true;
+#endif
+}
+
+void *allocAligned(size_t bytes) {
+  bytes = (bytes + kTcmAlign - 1) / kTcmAlign * kTcmAlign;
+#if defined(_WIN32)
+  return _aligned_malloc(bytes, kTcmAlign);
+#else
+  return std::aligned_alloc(kTcmAlign, bytes);
+#endif
+}
+
+void freeAligned(void *p) {
+#if defined(_WIN32)
+  _aligned_free(p);
+#else
+  std::free(p);
+#endif
+}
+
+// Ordinary memory standing in for the TCM of a thread: at least `bytes`
+// (and the size of a TCM block), grown on demand.  Grows only between program
+// instances: every call of one kernel asks for the same size.
+struct FallbackBuffer {
+  void *data = nullptr;
+  size_t bytes = 0;
+  ~FallbackBuffer() { freeAligned(data); }
+  void *get(size_t needed) {
+    needed = std::max(needed, kDefaultTcmBytes);
+    if (needed > bytes) {
+      freeAligned(data);
+      data = allocAligned(needed);
+      if (data == nullptr) {
+        std::fprintf(stderr, "triton-cpu-rt: error: cannot allocate %zu bytes "
+                             "for cpu.alloc buffers\n",
+                     needed);
+        std::abort();
+      }
+      bytes = needed;
+    }
+    return data;
+  }
+};
+
+void registerTcmReleaseAtExit(); // see "Global state"
+
+// Acquires the TCM block of `worker`; on the worker's own thread.
+void acquireTcm(Worker *worker) {
+  worker->tcmReady = true;
+  const TcmMode mode = tcmMode();
+  if (mode == TcmMode::Off || !worker->onAiCore)
+    return;
+  const TcmLib &lib = tcmLib();
+  if (!lib.ok) {
+    warnOnce(warnedTcmLib, "the TCM (libspine_tcm) is not available; "
+                           "cpu.alloc buffers are in ordinary memory");
+    return;
+  }
+  const int block = tcmBlockFor(lib, worker->cpu);
+  if (block < 0)
+    return;
+  void *base = lib.tryWait(block, 0);
+  if (base == nullptr) {
+    // A block whose owner thread no longer exists was left behind by a
+    // process that died while holding it.
+    SpineTcmBlockInfo info{};
+    if (lib.memInfo(block, &info) == 0 && info.isAcquired != 0 &&
+        info.ownerTid > 0 && !threadExists(info.ownerTid)) {
+      warnOncef(warnedTcmStale,
+                "reclaiming TCM block %d left behind by thread %d, which no "
+                "longer exists",
+                block, info.ownerTid);
+      lib.forceRelease(block);
+      base = lib.tryWait(block, 0);
+    }
+  }
+  if (base == nullptr) {
+    SpineTcmBlockInfo info{};
+    lib.memInfo(block, &info);
+    warnOncef(warnedTcmBusy,
+              "TCM block %d (cpu %d) is used by thread %d; cpu.alloc buffers "
+              "of this thread are in ordinary memory",
+              block, worker->cpu, info.ownerTid);
+    return;
+  }
+  worker->tcmBlock = block;
+  worker->tcm = base;
+  worker->tcmBytes = lib.blockBytes;
+  registerTcmReleaseAtExit();
+}
+
+// Releases the TCM block of `worker`; on the worker's own thread.  The next
+// use acquires it again.
+void releaseTcm(Worker *worker) {
+  if (worker->tcmBlock >= 0)
+    tcmLib().release(worker->tcmBlock);
+  worker->tcmReady = false;
+  worker->tcmBlock = -1;
+  worker->tcm = nullptr;
+  worker->tcmBytes = 0;
+}
+
+thread_local FallbackBuffer tlsTcmFallback;
+
+// Base of the cpu.alloc buffers (`bytes` in total) of the calling thread.
+void *tcmBase(int64_t bytes) {
+  const size_t needed = bytes > 0 ? static_cast<size_t>(bytes) : 0;
+  Worker *worker = tlsWorker;
+  if (worker != nullptr) {
+    if (!worker->tcmReady)
+      acquireTcm(worker);
+    if (worker->tcmBlock >= 0) {
+      if (needed <= worker->tcmBytes)
+        return worker->tcm;
+      warnOncef(warnedTcmSize,
+                "cpu.alloc buffers of %zu bytes do not fit into a TCM block "
+                "of %zu bytes; using ordinary memory",
+                needed, worker->tcmBytes);
+    }
+  }
+  if (tcmMode() == TcmMode::Require)
+    gTcmRequireFailed.store(true, std::memory_order_relaxed);
+  return tlsTcmFallback.get(needed);
+}
 
 //===----------------------------------------------------------------------===//
 // Execution
@@ -637,6 +936,10 @@ void *workerMain(void *raw) {
       }
       // `job` may be gone as soon as the latch opens; do not touch it after.
       done->arrive();
+    } else if (self->kind == MessageKind::TcmRelease) {
+      Latch *done = self->released;
+      releaseTcm(self);
+      done->arrive();
     } else {
       RegionTask *task = self->task;
       Latch *done = task->done;
@@ -708,6 +1011,7 @@ void createWorkers(Pool &pool) {
       Worker *worker = new Worker();
       worker->cpu = cpu;
       worker->spins = pool.spins;
+      worker->onAiCore = pool.ai;
       // An unpinned AI worker could still only run on AI cores, but would
       // break the one-worker-per-core layout; leave the core out instead.
       if (!startWorker(worker, /*mustPin=*/pool.ai)) {
@@ -846,6 +1150,34 @@ struct GlobalGuard {
   GlobalGuard &operator=(const GlobalGuard &) = delete;
 };
 
+// Every worker holding a TCM block releases it (only the acquiring thread
+// may); at exit and on tcrt_tcm_release().  A process killed while holding
+// blocks leaves them behind; the next process reclaims them (acquireTcm).
+void releaseAllTcm() {
+  GlobalGuard guard;
+  Pool *pool = gPool;
+  if (pool == nullptr)
+    return;
+  std::vector<Worker *> holders;
+  for (Worker *worker : pool->workers)
+    if (worker->tcmBlock >= 0)
+      holders.push_back(worker);
+  if (holders.empty())
+    return;
+  pool->tcmReleased.reset(static_cast<int>(holders.size()));
+  for (Worker *worker : holders) {
+    worker->kind = MessageKind::TcmRelease;
+    worker->released = &pool->tcmReleased;
+    worker->mail.notify();
+  }
+  pool->tcmReleased.wait(pool->spins);
+}
+
+void registerTcmReleaseAtExit() {
+  static std::once_flag once;
+  std::call_once(once, [] { std::atexit(releaseAllTcm); });
+}
+
 void writeTrace(const char *path, const std::vector<TraceEntry> &entries) {
   FILE *file = std::fopen(path, "w");
   if (file == nullptr)
@@ -896,6 +1228,8 @@ extern "C" TCRT_API int tcrt_launch(const tcrt_launch_desc *desc) {
   if (desc->grid[0] <= 0 || desc->grid[1] <= 0 || desc->grid[2] <= 0)
     return 0;
   const int warps = std::max(desc->warps, 1);
+  if (tlsWorker == nullptr)
+    gTcmRequireFailed.store(false, std::memory_order_relaxed);
 
   GridJob job;
   job.fn = desc->fn;
@@ -979,6 +1313,10 @@ extern "C" TCRT_API int tcrt_launch(const tcrt_launch_desc *desc) {
                        job.callerRegionTrace.end());
     writeRegionTrace(desc->trace_path, regionTrace);
   }
+  // TRITON_CPU_TCM=require and some cpu.alloc buffer was not in the TCM.  The
+  // launch itself completed (in ordinary memory).
+  if (gTcmRequireFailed.exchange(false, std::memory_order_relaxed))
+    return TCRT_ERROR_NO_TCM;
   return 0;
 }
 
@@ -1034,6 +1372,65 @@ extern "C" TCRT_API int32_t triton_cpu_current_cpu(void) {
 
 extern "C" TCRT_API int32_t triton_cpu_os_thread_id(void) {
   return static_cast<int32_t>(osThreadId());
+}
+
+extern "C" TCRT_API void *triton_cpu_tcm_base(int64_t bytes) {
+  return tcmBase(bytes);
+}
+
+extern "C" TCRT_API void *triton_cpu_tcm_base_shared(int64_t bytes) {
+  void *base = tcmBase(bytes);
+  // The buffers are used by the whole slot of the calling leader: check once
+  // per slot that its CPUs are next to the leader's block (only the two cores
+  // of a pair are; the others access it more than 100x slower).
+  Worker *worker = tlsWorker;
+  Slot *slot = tlsInRegion ? nullptr : tlsSlot;
+  if (worker != nullptr && slot != nullptr && worker->tcmBlock >= 0 &&
+      base == worker->tcm && !slot->tcmChecked) {
+    slot->tcmChecked = true;
+    const uint64_t mask = tcmBlockMask(worker->tcmBlock);
+    for (Worker *member : slot->members) {
+      if (member->cpu >= 0 && member->cpu < 64 && ((mask >> member->cpu) & 1))
+        continue;
+      warnOncef(warnedTcmShared,
+                "a cpu.alloc buffer used inside cpu.parallel is in the TCM "
+                "of cpu %d, which cpu %d of the same program instance "
+                "accesses slowly; use num_warps=2",
+                worker->cpu, member->cpu);
+      break;
+    }
+  }
+  return base;
+}
+
+extern "C" TCRT_API void tcrt_tcm_release(void) { releaseAllTcm(); }
+
+extern "C" TCRT_API int tcrt_tcm_available(void) {
+  GlobalGuard guard;
+  return getPoolLocked().ai && tcmMode() != TcmMode::Off && tcmLib().ok ? 1
+                                                                        : 0;
+}
+
+extern "C" TCRT_API int64_t tcrt_tcm_block_bytes(void) {
+  const TcmLib &lib = tcmLib();
+  return lib.ok ? static_cast<int64_t>(lib.blockBytes) : 0;
+}
+
+extern "C" TCRT_API int tcrt_worker_tcm(int cpu, int *block, void **base) {
+  GlobalGuard guard;
+  const Pool &pool = getPoolLocked();
+  for (const Worker *worker : pool.workers) {
+    if (worker->cpu != cpu)
+      continue;
+    if (!worker->tcmReady)
+      return -1;
+    if (block != nullptr)
+      *block = worker->tcmBlock;
+    if (base != nullptr)
+      *base = worker->tcm;
+    return worker->tcmBlock >= 0 ? 1 : 0;
+  }
+  return -1;
 }
 
 extern "C" TCRT_API int tcrt_num_cpus(void) {

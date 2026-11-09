@@ -27,6 +27,11 @@ kernel[(grid,)](x, out, sums, N=4096, BLOCK=128, num_warps=4)
 
 `python/examples/cpu_parallel_demo.py` is a runnable version that prints the
 threads and CPUs that executed each instance (from the runtime trace).
+`python/examples/cpu_parallel_matmul.py [M N K]` is a matrix multiplication:
+each instance computes `SPLIT_M` row blocks of its C tile, one per
+`cpu.parallel` iteration, each with its own K loop and `tl.dot`
+accumulator.  On the K3 (A100, grid 2x2, M=512 N=128 K=512) the inferred
+`num_warps=4` is 1.80x faster than `num_warps=1`.
 
 `cpu.current_cpu()` and `cpu.os_thread_id()` return, inside a kernel, the
 CPU (`sched_getcpu()`) and Linux thread id of the thread executing the call.
@@ -245,14 +250,37 @@ Run on the target:
 source env.sh
 cd triton-riscv/python/examples
 pytest -q test_program_instance_threads.py test_program_instance_parallel.py -s
+pytest -q test_program_instance_ai_cores.py -s   # SpacemiT K3 only
 python cpu_parallel_demo.py 4
 ```
 
+`test_program_instance_ai_cores.py` (skipped without `/proc/set_ai_thread`):
+the pool's CPUs are the AI cores and disjoint from the caller's affinity;
+serial parts, parallel iterations and all threads involved run on AI cores,
+pinned to one core each, for grid 1/64/16 and `num_warps` 1/4, never on the
+launching thread; instances stay in one AI L2 domain; the caller's affinity
+is unchanged; a forked child launches on AI cores again;
+`TRITON_CPU_AI_CORES=0` (in a subprocess) runs on the process' CPUs.
+
 ## Measured on the SpacemiT K3
 
-K3: 8 X100 cores visible to processes (`cpu0-7`, 2150 MHz) in two L2 domains
-`0-3` and `4-7`; the 8 A100 cores (`cpu8-15`) are online but outside the
-process affinity mask, so the runtime does not use them.
+K3: 8 X100 cores (`cpu0-7`, 2150 MHz, L2 domains `0-3`, `4-7`) and 8 A100
+cores (`cpu8-15`, 1800 MHz, L2 domains `8-11`, `12-15`).  By default the pool
+runs on the A100 cores (document 05, "AI cores"); `TRITON_CPU_AI_CORES=0`
+puts it on the X100 cores.
+
+Measured 2026-11-04 (`test_program_instance_*.py` plus the 17 basic example
+files: 139 tests in AI mode, 131 passed + 8 AI-core tests skipped with
+`TRITON_CPU_AI_CORES=0`):
+
+| | A100 (default) | X100 (`TRITON_CPU_AI_CORES=0`) |
+|---|---|---|
+| one instance, `num_warps=1` → `4` | 47.6 ms → 12.7 ms, 3.75x | 49.9 ms → 13.1 ms, 3.82x |
+| grid of 16, 1 → 8 workers | 7.66x | 7.89x |
+| empty grid=1 launch | 0.99 µs (posted to a worker) | 0.23 µs (calling thread) |
+
+`cpu_parallel_demo.py 8` in AI mode: each instance runs on 4 OS threads on
+`8-11` or `12-15`.  The rest of this section is the earlier X100 run:
 
 ```
 $ pytest -q test_program_instance_threads.py test_program_instance_parallel.py -s

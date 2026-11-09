@@ -174,6 +174,35 @@ def _infer_num_warps() -> int:
     return max(1, _l2_domain_size(min(available), available))
 
 
+# ---------------------------- cpu.alloc / TCM -------------------------------
+# Total size of the cpu.alloc buffers of a kernel (buddy-mlir --cpu-tcm-assign):
+# one TCM block of the SpacemiT K3 A100 cores.  The runtime falls back to
+# ordinary memory if the block of a core is smaller (or not available).
+_TCM_DEFAULT_LIMIT = 384 * 1024
+
+
+def _tcm_limit() -> int:
+    value = os.getenv("TRITON_CPU_TCM_LIMIT", "")
+    if not value:
+        return _TCM_DEFAULT_LIMIT
+    limit = int(value)
+    if limit <= 0:
+        raise ValueError(f"TRITON_CPU_TCM_LIMIT must be positive, got {value}")
+    return limit
+
+
+def _tcm_passes(vectorir: str):
+    """buddy-opt passes for the cpu.alloc buffers of a kernel, if it has any.
+
+    --cpu-tcm-assign gives every buffer (memref.alloc {cpu.tcm}) a static
+    offset in the TCM of the thread executing the allocation, obtained from
+    the runtime (triton_cpu_tcm_base) where the buffer is allocated.
+    """
+    if "cpu.tcm" not in vectorir:
+        return []
+    return [f"--cpu-tcm-assign=limit={_tcm_limit()}"]
+
+
 def _resolve_num_warps(num_warps) -> int:
     num_warps = int(num_warps or 0)
     if num_warps < 0:
@@ -365,6 +394,7 @@ def _vectorir_to_llir(vectorir: str):
                 # "--empty-tensor-to-alloc-tensor",
                 # "--one-shot-bufferize=allow-return-allocs-from-loops=true",
                 # "--matmul-vectorization",
+                *_tcm_passes(vectorir),
                 "--lower-affine",
                 "--convert-linalg-to-loops",
                 "--expand-strided-metadata",

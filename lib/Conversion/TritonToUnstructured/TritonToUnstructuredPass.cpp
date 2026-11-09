@@ -137,6 +137,7 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -506,8 +507,44 @@ public:
                 store->erase();
                 return success();
               })
-              .Case<triton::MakeTensorPtrOp,
-                    tts::MakeTensorPtrOp>([&](auto makeTensorPtr) {
+              .Case<tts::MakeTensorPtrOp>([&](tts::MakeTensorPtrOp
+                                                  makeTensorPtr) {
+                // tts.make_tptr keeps constant offsets in static_offsets, so
+                // getOffsetsMutable() may be empty (e.g. a base produced by
+                // tt.int_to_ptr with all-constant offsets).  Its offsets are
+                // already scaled by the strides, so the accumulated element
+                // offset of the base can be added to the first one.
+                auto offsetInfo = offsetMap.at(makeTensorPtr.getBase());
+                makeTensorPtr.getBaseMutable().set(offsetInfo.ptr);
+                if (isConstantIntValue(offsetInfo.offset, 0))
+                  return success();
+
+                SmallVector<OpFoldResult> offsets =
+                    makeTensorPtr.getMixedOffsets();
+                if (offsets.empty()) {
+                  makeTensorPtr.emitError(
+                      "cannot fold a pointer offset into a rank-0 tensor "
+                      "pointer");
+                  return failure();
+                }
+                Value baseOffset = b.create<arith::IndexCastOp>(
+                    loc, b.getIndexType(), offsetInfo.offset);
+                Value first =
+                    isa<Value>(offsets[0])
+                        ? cast<Value>(offsets[0])
+                        : b.create<arith::ConstantIndexOp>(
+                              loc, *getConstantIntValue(offsets[0]));
+                offsets[0] =
+                    b.create<arith::AddIOp>(loc, first, baseOffset).getResult();
+                auto rebuilt = b.create<tts::MakeTensorPtrOp>(
+                    loc, makeTensorPtr.getBase(), makeTensorPtr.getSizes(),
+                    makeTensorPtr.getMixedStrides(), offsets,
+                    makeTensorPtr.getMixedShape(), makeTensorPtr.getOrder());
+                makeTensorPtr->replaceAllUsesWith(rebuilt);
+                makeTensorPtr->erase();
+                return success();
+              })
+              .Case<triton::MakeTensorPtrOp>([&](auto makeTensorPtr) {
                 // For block pointers, the base could come from a sequence of
                 // `tt.addptr`. Accumulate the target offset with the offset
                 // we have saved.

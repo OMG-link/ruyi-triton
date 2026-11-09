@@ -297,10 +297,12 @@ def test_kernel_reports_one_cluster(backend):
 
 def test_warps_reduce_instance_parallelism(backend, monkeypatch, tmp_path):
     """AC4: concurrent instances drop as num_warps grows; threads stay bounded."""
-    ncpu = len(os.sched_getaffinity(0))
+    lib = runtime()
+    # The pool's CPUs; on the K3 these are the AI cores, outside the affinity
+    # of this thread.
+    ncpu = lib.tcrt_num_cpus()
     if ncpu < 2:
         pytest.skip("needs at least 2 CPUs")
-    lib = runtime()
     iterations = calibrate(0.004)
     warps_list = sorted({1, 2, max_slot_size(64)})
     concurrency = {}

@@ -15,6 +15,7 @@ As a serial execution can never interleave two program instances, an observed
 interleaving is proof that the grid is no longer traversed serially.
 """
 
+import ctypes
 import os
 import time
 
@@ -24,6 +25,7 @@ import torch
 import triton
 import triton.language as tl
 
+from triton.backends.triton_shared import driver as cpu_driver
 from triton.backends.triton_shared.driver import CPUDriver
 
 NUM_THREADS_ENV = "TRITON_CPU_NUM_THREADS"
@@ -36,10 +38,13 @@ BUSY_BLOCK = 64
 
 
 def available_cpus():
-    try:
-        return len(os.sched_getaffinity(0))
-    except AttributeError:  # pragma: no cover - non-Linux
-        return os.cpu_count() or 1
+    """CPUs of the runtime's worker pool.
+
+    Not os.sched_getaffinity(0): on the SpacemiT K3 the pool runs on the AI
+    cores, which are outside the affinity of the calling thread.
+    """
+    path, _ = cpu_driver._get_runtime_library(cpu_driver._get_sanitizer_type())
+    return ctypes.CDLL(path).tcrt_num_cpus()
 
 
 @pytest.fixture

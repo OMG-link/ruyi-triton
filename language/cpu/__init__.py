@@ -18,10 +18,13 @@ Example::
     kernel[grid](..., num_warps=4)
 
 Inside a kernel, ``cpu.current_cpu()`` and ``cpu.os_thread_id()`` return the
-CPU and the Linux thread id of the thread executing the call.
+CPU and the Linux thread id of the thread executing the call, and
+``cpu.alloc(shape, dtype)`` returns a pointer to a scratch buffer in the TCM of
+that thread.
 """
 
 from .introspection import current_cpu, os_thread_id
+from .memory import alloc
 from .parallel import parallel
 
-__all__ = ["current_cpu", "os_thread_id", "parallel"]
+__all__ = ["alloc", "current_cpu", "os_thread_id", "parallel"]

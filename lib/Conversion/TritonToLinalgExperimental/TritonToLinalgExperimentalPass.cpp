@@ -10,6 +10,7 @@
 #include "triton-shared/Conversion/TritonArithToLinalg/TritonArithToLinalg.h"
 #include "triton-shared/Conversion/TritonPtrToMemref/TritonPtrToMemref.h"
 #include "triton-shared/Conversion/TritonToLinalgExperimental/CollapseShape.h"
+#include "triton-shared/Conversion/TritonToLinalgExperimental/CpuTcmAllocToMemref.h"
 #include "triton-shared/Conversion/TritonToLinalgExperimental/ReconcilePtrCasts.h"
 #include "triton-shared/Conversion/TritonToLinalgExperimental/TritonToLinalgExperimental.h"
 #include "triton-shared/Conversion/TritonToLinalgExperimental/TritonToPtr.h"
@@ -82,6 +83,8 @@ public:
     pm.addPass(createTritonToPtrPass());
     pm.addPass(createReconcileUnrealizedCastsPass());
     pm.addPass(createReconcilePtrCastsPass());
+    // Buffers of triton.language.extra.cpu.alloc: tptr chains -> memref.alloc.
+    pm.addPass(createCpuTcmAllocToMemrefPass());
 
     // Now that remove-dead-values fully works with linalg ops, clean up the IR
     // again, particularly unused loop iter-args that were created

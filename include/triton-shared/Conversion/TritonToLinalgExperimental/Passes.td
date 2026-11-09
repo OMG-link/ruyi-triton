@@ -28,6 +28,11 @@ def ReconcilePtrCasts : Pass<"reconcile-ptr-casts", "mlir::ModuleOp"> {
   let constructor = "triton::createReconcilePtrCastsPass()";
 }
 
+def CpuTcmAllocToMemref : Pass<"cpu-tcm-alloc-to-memref", "mlir::ModuleOp"> {
+  let summary = "Lower the buffers of triton.language.extra.cpu.alloc to memref.alloc ops marked cpu.tcm";
+  let constructor = "triton::createCpuTcmAllocToMemrefPass()";
+}
+
 def TritonToPtr : Pass<"triton-to-ptr", "mlir::ModuleOp"> {
   let summary = "Convert Triton ops on pointers to the Ptr dialect";
   let constructor = "triton::createTritonToPtrPass()";

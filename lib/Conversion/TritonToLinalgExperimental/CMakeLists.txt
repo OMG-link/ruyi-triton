@@ -9,6 +9,7 @@ add_triton_library(TritonToLinalgExperimental
   ReconcilePtrCastsPass.cpp
   TritonToPtrPass.cpp
   CollapseShape.cpp
+  CpuTcmAllocToMemrefPass.cpp
 
   DEPENDS
   TritonToLinalgExperimentalConversionPassIncGen

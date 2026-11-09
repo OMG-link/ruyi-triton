@@ -70,12 +70,50 @@ compiled into every launcher.
   a completion latch.  Both spin for `TRITON_CPU_SPIN` iterations and then
   sleep on a futex.
 
+## AI cores (SpacemiT K3)
+
+The K3 has 8 X100 cores (`cpu0-7`) and 8 A100 "AI" cores (`cpu8-15`, two L2
+domains `8-11` and `12-15`).  The A100 cores are outside the affinity of
+ordinary threads: `sched_setaffinity` to them fails with `EINVAL`.  A thread
+gets access to them by writing its own thread id to `/proc/set_ai_thread`
+(writable by every user).  Measured on kernel 6.18.3:
+
+* the thread is moved to the A100 cores at once; its affinity becomes `8-15`
+  and it can then be pinned to a single A100 core;
+* the move is one way: the thread can no longer be pinned to an X100 core;
+* only the writing thread is affected; threads it creates inherit its
+  affinity, other threads of the process are not touched.
+
+By default, when `/proc/set_ai_thread` exists, the pool runs on the AI cores
+only, so that kernels can later use A100-only instructions and the A100 TCM:
+
+* **Topology.** A short-lived thread moves itself to the AI cores and reads
+  its affinity; that set (not a hard-coded `8-15`) replaces the CPUs of the
+  process.  Domains are detected from sysfs as usual.
+* **Workers.** Another short-lived thread moves itself to the AI cores and
+  creates the workers.  They inherit the access and are pinned to their AI
+  core at creation (`pthread_attr_setaffinity_np`), so they never execute
+  anything on an X100 core and no running thread is ever migrated (moving a
+  running thread between cores with different VLEN, 256 vs 1024 bit, is a
+  known source of crashes).  A worker that cannot be pinned is left out
+  instead of running unpinned.
+* **No kernel code on the calling thread.** The `P == 1` shortcut below is
+  disabled: a launch with one instance is posted to one worker.  The calling
+  thread is never moved, so its affinity stays `0-7`.  The cost is about
+  1 µs per launch (0.99 µs instead of 0.23 µs for an empty grid=1 launch).
+* **Fallback.** If moving a thread fails, the runtime warns once and uses the
+  CPUs of the process.  `TRITON_CPU_AI_CORES=0` selects that behaviour
+  explicitly.  Without `/proc/set_ai_thread` (K1, x86, qemu) nothing changes.
+* `tcrt_ai_cores()` reports the mode; `compiler.py::_ai_core_cpus()` performs
+  the same probe so that the `num_warps=0` inference uses the AI domains.
+
 ## Number of concurrent program instances
 
 `P = min(available CPUs, TRITON_CPU_NUM_THREADS if > 0, number of instances)`.
 
 If `P == 1` (single CPU, a single instance, or `TRITON_CPU_NUM_THREADS=1`), the
-grid runs on the calling thread and the pool is not involved at all.
+grid runs on the calling thread and the pool is not involved at all, except on
+the AI cores, where it runs on one worker (see above).
 
 `TRITON_CPU_NUM_THREADS` is now capped at the number of available CPUs: there
 is exactly one worker per CPU, so asking for more cannot create more
@@ -89,6 +127,8 @@ concurrency.
 | `TRITON_CPU_TRACE_FILE` | If set, the runtime writes one CSV line per program instance: `instance,start_ns,end_ns,thread_id,cpu,os_tid` (and `<file>.threads` for parallel regions, see document 06). Debug/test facility only. Read at every launch. |
 | `TRITON_CPU_CLUSTERS` | Overrides the domain detection, e.g. `0-3;4-7`. CPUs it does not mention form their own domains. Read when the pool is created. |
 | `TRITON_CPU_SPIN` | Spin iterations before a waiting thread sleeps (default `4000`). Higher values lower the wake-up latency of back-to-back launches and burn more CPU while idle. Read when the pool is created. |
+| `TRITON_CPU_AI_CORES` | `0` keeps the pool off the SpacemiT AI cores (A100) and on the CPUs of the process. Any other value, or unset: use the AI cores when `/proc/set_ai_thread` exists. Read when the pool is created. |
+| `TRITON_CPU_TCM`, `TRITON_CPU_TCM_LIMIT` | TCM for `cpu.alloc` buffers, see [07-CPU-Alloc-TCM.md](07-CPU-Alloc-TCM.md). |
 
 In the trace, `thread_id` is the rank of the worker within the launch (`0` for
 the calling thread when `P == 1`) and `os_tid` its Linux thread id.  `cpu` is `sched_getcpu()` at instance start,
@@ -105,7 +145,8 @@ and friends have no effect on the launcher.
   there) and rebuilt on first use.  `pthread_atfork` also makes sure no launch
   is in flight while a process forks.
 * Exit: workers are detached threads sleeping on a futex; they do not delay
-  `exit()`.
+  `exit()`.  Workers holding a TCM block release it from an `atexit` handler
+  (see [07-CPU-Alloc-TCM.md](07-CPU-Alloc-TCM.md)).
 * Launches from several application threads are serialized by a lock inside
   the runtime.  The generated launcher currently holds the GIL during the
   launch anyway.
