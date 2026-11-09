@@ -113,19 +113,60 @@ def _l2_domain_size(cpu: int, available) -> int:
         return 0
 
 
+_AI_THREAD_PATH = "/proc/set_ai_thread"
+
+
+@functools.lru_cache()
+def _ai_core_cpus():
+    """CPUs the runtime's worker pool uses on the AI cores, or None.
+
+    Mirrors the runtime (backend/runtime/triton_cpu_rt.cpp): on the SpacemiT
+    K3 the A100 cores are outside the affinity of ordinary threads, and the
+    pool runs on them unless TRITON_CPU_AI_CORES=0.  The AI cores are the
+    affinity of a thread moved to them through /proc/set_ai_thread; the move
+    cannot be undone, so it is done on a throw-away thread.
+    """
+    if os.getenv("TRITON_CPU_AI_CORES") == "0":
+        return None
+    if not hasattr(os, "sched_getaffinity") or not os.access(_AI_THREAD_PATH, os.W_OK):
+        return None
+    import threading
+
+    result = []
+
+    def probe():
+        try:
+            fd = os.open(_AI_THREAD_PATH, os.O_WRONLY | os.O_CLOEXEC)
+            try:
+                os.write(fd, str(threading.get_native_id()).encode())
+            finally:
+                os.close(fd)
+            # pid 0: the calling thread.
+            result.extend(sorted(os.sched_getaffinity(0)))
+        except OSError:
+            pass
+
+    thread = threading.Thread(target=probe, name="triton-cpu-ai-probe")
+    thread.start()
+    thread.join()
+    return frozenset(result) or None
+
+
 @functools.lru_cache()
 def _infer_num_warps() -> int:
     """Placeholder inference of the threads per program instance (num_warps=0).
 
-    Uses the number of CPUs sharing the L2 cache of the first available CPU,
-    i.e. one full cluster per program instance (4 on the SpacemiT K1), so
-    that the threads of an instance share an L2.  Falls back to 1.
+    Uses the number of CPUs sharing the L2 cache of the first CPU the runtime
+    runs kernels on (the AI cores on the SpacemiT K3, see _ai_core_cpus(),
+    otherwise the CPUs available to the process), i.e. one full cluster per
+    program instance (4 on the SpacemiT K1 and K3), so that the threads of an
+    instance share an L2.  Falls back to 1.
 
     TODO: replace by an inference based on the kernel (work per instance,
     grid size, memory footprint).
     """
     try:
-        available = set(os.sched_getaffinity(0))
+        available = set(_ai_core_cpus() or os.sched_getaffinity(0))
     except AttributeError:  # pragma: no cover - non-Linux
         return 1
     if not available:

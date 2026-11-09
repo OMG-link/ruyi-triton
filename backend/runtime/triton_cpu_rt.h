@@ -3,7 +3,10 @@
 // Process wide runtime of the triton-riscv CPU backend.
 //
 // The runtime owns a pool of worker threads, one per CPU available to the
-// process, each pinned to its CPU when it is created.  Generated launchers hand
+// process, each pinned to its CPU when it is created.  On the SpacemiT K3
+// (/proc/set_ai_thread present) the pool uses the AI cores (A100) instead, and
+// all kernel code runs on them; TRITON_CPU_AI_CORES=0 opts out.  Generated
+// launchers hand
 // a whole launch grid to tcrt_launch(), which executes the program instances
 // on the pool.  Compiled kernels call __cpar_parallel() to run a code region
 // with several threads inside one program instance.
@@ -96,6 +99,9 @@ TCRT_API int tcrt_domain_cpus(int domain, int *cpus, int cap);
 // Number of slots, i.e. the maximum number of concurrent program instances, of
 // a launch with `warps` threads per program instance.
 TCRT_API int tcrt_num_slots(int warps);
+// 1 if the pool runs on the AI cores (the CPUs of tcrt_domain_cpus are then AI
+// cores and kernel code never runs on the calling thread), 0 otherwise.
+TCRT_API int tcrt_ai_cores(void);
 
 #ifdef __cplusplus
 } // extern "C"

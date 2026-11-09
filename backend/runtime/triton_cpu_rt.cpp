@@ -7,6 +7,14 @@
 // Structure:
 //   * Topology: the CPUs available to the process (sched_getaffinity) grouped
 //     into "domains", i.e. CPUs sharing an L2 cache (one cluster on the K1).
+//   * AI cores (SpacemiT K3): the A100 cores are outside the affinity of
+//     ordinary threads; a thread gets access to them, and loses access to the
+//     other cores, by writing its id to /proc/set_ai_thread.  When that file
+//     exists (and TRITON_CPU_AI_CORES is not "0") the pool uses the AI cores
+//     only: a short lived thread enables them for itself, reads the resulting
+//     affinity, and creates the workers, which inherit the access and are
+//     pinned to one AI core each.  No kernel code then runs on any other core,
+//     not even on the calling thread.
 //   * Pool: one worker thread per available CPU, pinned to that CPU at creation
 //     and never migrated afterwards.  Workers sleep on a per-worker mailbox.
 //   * Slots: for a launch with W threads per program instance every domain is
@@ -36,12 +44,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <string>
 #include <tuple>
 #include <vector>
 
 #if defined(__linux__)
+#include <fcntl.h>
 #include <linux/futex.h>
 #include <pthread.h>
 #include <sched.h>
@@ -259,6 +269,83 @@ std::vector<int> availableCpus() {
   return cpus;
 }
 
+//===----------------------------------------------------------------------===//
+// AI cores (SpacemiT K3)
+//===----------------------------------------------------------------------===//
+
+#if defined(__linux__)
+const char *const kAiThreadPath = "/proc/set_ai_thread";
+#endif
+
+// True if the pool should run on the AI cores: the kernel interface exists
+// and TRITON_CPU_AI_CORES does not opt out.
+bool aiCoresRequested() {
+#if defined(__linux__)
+  const char *env = std::getenv("TRITON_CPU_AI_CORES");
+  if (env != nullptr && std::strcmp(env, "0") == 0)
+    return false;
+  return access(kAiThreadPath, W_OK) == 0;
+#else
+  return false;
+#endif
+}
+
+#if defined(__linux__)
+// Moves the calling thread to the AI cores.  The move is one way: afterwards
+// the thread (and every thread it creates) can only run on AI cores.  The
+// migration happens inside the write() system call, where the vector state is
+// discarded anyway, so it is safe even across cores with different VLEN.
+bool enableAiCoresForThisThread() {
+  const int fd = open(kAiThreadPath, O_WRONLY | O_CLOEXEC);
+  if (fd < 0)
+    return false;
+  char text[32];
+  const int length = std::snprintf(text, sizeof(text), "%lld",
+                                   static_cast<long long>(osThreadId()));
+  const ssize_t written = write(fd, text, static_cast<size_t>(length));
+  close(fd);
+  return written == length;
+}
+
+struct AiThreadTask {
+  const std::function<void()> *body = nullptr;
+  bool enabled = false;
+};
+
+void *aiThreadMain(void *raw) {
+  AiThreadTask *task = static_cast<AiThreadTask *>(raw);
+  task->enabled = enableAiCoresForThisThread();
+  if (task->enabled)
+    (*task->body)();
+  return nullptr;
+}
+#endif
+
+// Runs `body` on a new, short lived thread that has been moved to the AI cores
+// and waits for it.  The calling thread is left untouched.  Returns false (and
+// does not run `body`) if the thread could not be created or moved.
+bool runOnAiThread(const std::function<void()> &body) {
+#if defined(__linux__)
+  AiThreadTask task;
+  task.body = &body;
+  // The thread and the workers it creates must not take asynchronous signals
+  // away from the application threads.
+  sigset_t all, previous;
+  sigfillset(&all);
+  pthread_sigmask(SIG_SETMASK, &all, &previous);
+  pthread_t thread;
+  const int rc = pthread_create(&thread, nullptr, aiThreadMain, &task);
+  pthread_sigmask(SIG_SETMASK, &previous, nullptr);
+  if (rc != 0)
+    return false;
+  pthread_join(thread, nullptr);
+  return task.enabled;
+#else
+  (void)body;
+  return false;
+#endif
+}
+
 #if defined(__linux__)
 bool readFirstLine(const std::string &path, std::string &line) {
   std::ifstream file(path);
@@ -426,6 +513,9 @@ struct Pool {
   std::vector<int> cpus;
   std::vector<std::vector<int>> domains;
   uint32_t spins = 0;
+  // The pool runs on the AI cores (`cpus` are AI cores); kernel code must
+  // then never run on the calling thread.
+  bool ai = false;
   bool started = false;
   Latch gridDone;
   std::vector<Worker *> workers;                 // started workers only
@@ -564,11 +654,15 @@ void *workerMain(void *raw) {
 
 std::atomic<bool> warnedPin{false};
 std::atomic<bool> warnedThread{false};
+std::atomic<bool> warnedAi{false};
+std::atomic<bool> warnedAiEmpty{false};
 
 // Starts a detached worker pinned to `worker->cpu`.  Asynchronous signals are
 // blocked in the worker so that they keep being delivered to the threads of
-// the embedding application (e.g. the Python main thread).
-bool startWorker(Worker *worker) {
+// the embedding application (e.g. the Python main thread).  If pinning is
+// refused the worker runs unpinned, unless `mustPin` is set, in which case it
+// is not started at all.
+bool startWorker(Worker *worker, bool mustPin) {
 #if defined(__linux__)
   sigset_t all, previous;
   sigfillset(&all);
@@ -583,8 +677,10 @@ bool startWorker(Worker *worker) {
   const bool pinRequested =
       pthread_attr_setaffinity_np(&attr, sizeof(set), &set) == 0;
   pthread_t thread;
-  int rc = pthread_create(&thread, &attr, workerMain, worker);
-  if (rc != 0 && pinRequested) {
+  int rc = -1;
+  if (pinRequested || !mustPin)
+    rc = pthread_create(&thread, &attr, workerMain, worker);
+  if (rc != 0 && pinRequested && !mustPin) {
     // Pinning may be refused (e.g. restricted cpusets); run unpinned.
     warnOnce(warnedPin, "could not pin worker threads to their CPU");
     pthread_attr_destroy(&attr);
@@ -596,6 +692,7 @@ bool startWorker(Worker *worker) {
   pthread_sigmask(SIG_SETMASK, &previous, nullptr);
   return rc == 0;
 #else
+  (void)mustPin;
   try {
     std::thread(workerMain, worker).detach();
     return true;
@@ -605,15 +702,15 @@ bool startWorker(Worker *worker) {
 #endif
 }
 
-void startPool(Pool &pool) {
-  pool.started = true;
-  pool.byDomain.assign(pool.domains.size(), {});
+void createWorkers(Pool &pool) {
   for (size_t d = 0; d < pool.domains.size(); ++d) {
     for (int cpu : pool.domains[d]) {
       Worker *worker = new Worker();
       worker->cpu = cpu;
       worker->spins = pool.spins;
-      if (!startWorker(worker)) {
+      // An unpinned AI worker could still only run on AI cores, but would
+      // break the one-worker-per-core layout; leave the core out instead.
+      if (!startWorker(worker, /*mustPin=*/pool.ai)) {
         delete worker;
         warnOnce(warnedThread, "could not create all worker threads");
         continue;
@@ -622,6 +719,24 @@ void startPool(Pool &pool) {
       pool.byDomain[d].push_back(worker);
     }
   }
+}
+
+void startPool(Pool &pool) {
+  pool.started = true;
+  pool.byDomain.assign(pool.domains.size(), {});
+  if (!pool.ai) {
+    createWorkers(pool);
+    return;
+  }
+  // Workers created by a thread that has access to the AI cores inherit the
+  // access, so they can be pinned to their AI core from the start and never
+  // execute anything on another core.  The creating thread is joined before
+  // runOnAiThread() returns, which publishes its writes to `pool`.
+  if (!runOnAiThread([&pool] { createWorkers(pool); }))
+    warnOnce(warnedAi, "could not move the worker threads to the AI cores");
+  if (pool.workers.empty())
+    warnOnce(warnedAiEmpty, "no worker thread on the AI cores; kernels run "
+                            "on the calling thread");
 }
 
 // Slots of a launch with `warps` threads per instance, in launch order.
@@ -702,7 +817,21 @@ Pool &getPoolLocked() {
     }
 #endif
     Pool *pool = new Pool();
-    pool->cpus = availableCpus();
+    if (aiCoresRequested()) {
+      // The AI cores are the affinity of a thread moved to them.  Probe on a
+      // throw-away thread: the move cannot be undone.
+      std::vector<int> aiCpus;
+      if (runOnAiThread([&aiCpus] { aiCpus = availableCpus(); })) {
+        pool->ai = true;
+        pool->cpus = aiCpus;
+      } else {
+        warnOnce(warnedAi, "could not move threads to the AI cores "
+                           "(/proc/set_ai_thread); using the CPUs of the "
+                           "process");
+      }
+    }
+    if (!pool->ai)
+      pool->cpus = availableCpus();
     pool->domains = detectDomains(pool->cpus);
     pool->spins = static_cast<uint32_t>(envInt("TRITON_CPU_SPIN", 4000));
     gPool = pool;
@@ -799,9 +928,10 @@ extern "C" TCRT_API int tcrt_launch(const tcrt_launch_desc *desc) {
     if (requested > 0)
       limit = std::min<int64_t>(limit, requested);
 
-    // A single instance at a time on a single CPU: no pool round trip.
+    // A single instance at a time on a single CPU: no pool round trip.  Not
+    // on the AI cores, where kernel code must not run on the calling thread.
     const bool single =
-        warps == 1 &&
+        !pool.ai && warps == 1 &&
         std::min<int64_t>(limit, static_cast<int64_t>(pool.cpus.size())) <= 1;
     if (!single && !pool.started)
       startPool(pool);
@@ -812,8 +942,10 @@ extern "C" TCRT_API int tcrt_launch(const tcrt_launch_desc *desc) {
             ? 0
             : std::min<int64_t>(limit, static_cast<int64_t>(layout->size()));
 
-    if (parallel == 0 ||
-        (parallel == 1 && (*layout)[0]->members.size() == 1)) {
+    // parallel == 0 with the AI cores means that no AI worker could be
+    // started (warned in startPool).
+    if (parallel == 0 || (!pool.ai && parallel == 1 &&
+                          (*layout)[0]->members.size() == 1)) {
       runOnCaller();
     } else {
       const int leaders = static_cast<int>(parallel);
@@ -923,6 +1055,11 @@ extern "C" TCRT_API int tcrt_domain_cpus(int domain, int *cpus, int cap) {
   for (int i = 0; i < cap && static_cast<size_t>(i) < list.size(); ++i)
     cpus[i] = list[i];
   return static_cast<int>(list.size());
+}
+
+extern "C" TCRT_API int tcrt_ai_cores(void) {
+  GlobalGuard guard;
+  return getPoolLocked().ai ? 1 : 0;
 }
 
 extern "C" TCRT_API int tcrt_num_slots(int warps) {
