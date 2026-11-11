@@ -119,9 +119,32 @@ workers of the slot (helper `m` runs `m, m + S, ...`). Called anywhere else
 (single CPU slot, nested region, outside a launch) it runs the ids one after
 the other on the calling thread. The kernel always sees `nthreads = W`.
 
-## Where a kernel runs
+## The warp running an iteration
 
-`tl.dev.current_cpu()` and `tl.dev.os_thread_id()` (patch 0016) return, as
+`tl.dev.warp_id()` (patch 0018), valid only inside a `tl.dev.parallel` loop
+(its verifier), returns as int32 the warp in `[0, num_warps)` that runs the
+current iteration. A warp runs one iteration at a time and finishes it before
+it gets another, so resources indexed by it belong to the iteration while it
+runs: a row of per-warp scratch, or the warp's scratchpad share. On the CPU
+backend a warp is a CPU of the instance's slot and the value is its position
+in the slot, the CPU's offset from the slot's first CPU when the
+configuration lists consecutive CPUs. It lowers to the runtime's
+`tcrt_warp_id`. Index per-warp resources by it, never by the loop's
+iteration variable: how iterations are handed to warps is the backend's
+choice.
+
+```python
+scratch = tl.dev.alloc((tl.dev.num_threads(), BLOCK), tl.float32, placement="local")
+for i in tl.dev.parallel(0, N, BLOCK):
+    mine = scratch + tl.dev.warp_id() * BLOCK
+```
+
+## Where a kernel runs (deprecated, debugging only)
+
+
+`tl.dev.current_cpu()` and `tl.dev.os_thread_id()` (patch 0016) are
+deprecated and only for debugging `tl.dev.parallel`; they warn when a kernel
+using them is compiled and do not belong in real kernels. They return, as
 int32, the CPU (`sched_getcpu`) and Linux thread id of the thread executing
 the call; inside a `tl.dev.parallel` loop, of the thread running the
 iteration. They are `tt.dev.current_cpu` / `tt.dev.os_thread_id`, which write

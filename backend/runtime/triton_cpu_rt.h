@@ -147,6 +147,15 @@ typedef void (*cpar_region_fn)(void *ctx, int64_t tid, int64_t nthreads);
 // calls are made one after the other on the calling thread.
 TCRT_API void __cpar_parallel(cpar_region_fn fn, void *ctx, int64_t nthreads);
 
+// Inside a parallel region: the warp running the current call of the body,
+// i.e. the position in its program instance's slot of the CPU the calling
+// worker is pinned to, in [0, slot size). A warp runs one call at a time.
+// The slot's CPUs are consecutive in the configuration, so this is the CPU's
+// offset from the slot's first CPU when the configuration lists consecutive
+// CPU numbers (as the board configurations do). 0 outside of a region.
+TCRT_API int32_t tcrt_warp_id(void);
+
+// Debugging only (tl.dev.current_cpu / tl.dev.os_thread_id, deprecated):
 // CPU the calling thread is running on (sched_getcpu), -1 if unknown.
 TCRT_API int32_t tcrt_current_cpu(void);
 // Linux thread id (gettid) of the calling thread.

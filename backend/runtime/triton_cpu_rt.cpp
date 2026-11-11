@@ -358,6 +358,8 @@ thread_local Worker *tlsWorker = nullptr;
 thread_local Slot *tlsSlot = nullptr;
 // True while the current thread executes a parallel region.
 thread_local bool tlsInRegion = false;
+// Position of the current thread in its slot while it runs a region.
+thread_local int32_t tlsWarp = 0;
 // Tracing state of the instance executed by the current thread.
 thread_local bool tlsTracing = false;
 thread_local int64_t tlsInstance = -1;
@@ -457,6 +459,9 @@ void *workerMain(void *raw) {
     case MessageKind::Grid: {
       GridJob *job = self->job;
       Latch *done = job->done;
+      // A leader is warp 0 of its slot; a region it runs serially (one CPU
+      // slot, or num_warps = 1 where none is created) keeps that.
+      tlsWarp = 0;
       {
         InstanceScope scope(self->slot, job->trace != nullptr,
                             &self->regionTrace);
@@ -471,6 +476,7 @@ void *workerMain(void *raw) {
       Latch *done = task->done;
       tlsInRegion = true;
       tlsRegionSink = &self->regionTrace;
+      tlsWarp = self->member;
       runRegionShare(*task, self->member);
       tlsInRegion = false;
       // `task` lives on the leader's stack; do not touch it after.
@@ -936,10 +942,15 @@ extern "C" TCRT_API void __cpar_parallel(cpar_region_fn fn, void *ctx,
     helper->mail.notify();
   }
   tlsInRegion = true;
+  tlsWarp = 0;
   runRegionShare(task, 0);
   tlsInRegion = savedInRegion;
   task.done->wait();
 }
+
+// A region run serially on one thread (single CPU slot, nested region) keeps
+// the warp of that thread: 0, or the enclosing region's.
+extern "C" TCRT_API int32_t tcrt_warp_id(void) { return tlsWarp; }
 
 extern "C" TCRT_API int32_t tcrt_current_cpu(void) {
   return static_cast<int32_t>(currentCpu());

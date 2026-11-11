@@ -154,7 +154,7 @@ def test_slot_layout(device):
     # A slot larger than a domain starts at a domain boundary and spans the
     # next one (with a warning); what is left is too small for another.
     assert layouts[6] == [cpus[:6]]
-    assert "span several L2 domains" in result.stderr
+    assert "span several domains" in result.stderr
     assert layouts[8] == [cpus]
     # Never more CPUs than the configuration.
     assert layouts[16] == [cpus]
@@ -288,6 +288,7 @@ def _where_kernel(cpu_ptr, tid_ptr, serial_ptr, N: tl.constexpr):
     tl.store(serial_ptr + pid * 2 + 1, tl.dev.os_thread_id())
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_thread_queries(device):
     from triton.backends.triton_shared import cpu_runtime
 
@@ -362,3 +363,38 @@ def test_num_threads_default_is_one_cluster(device):
     compiled = _per_thread_kernel[(1,)](out, threads, N=64, BLOCK=16)
     assert threads.item() == compiled.metadata.num_warps == board.cluster_size(
         compiled.metadata.board_config)
+
+
+# --------------------------------------------------------------------------
+# tl.dev.warp_id
+# --------------------------------------------------------------------------
+
+
+@triton.jit
+def _warp_kernel(warp_ptr, cpu_ptr, tid_ptr, N: tl.constexpr):
+    pid = tl.program_id(0)
+    for i in tl.dev.parallel(0, N):
+        tl.store(warp_ptr + pid * N + i, tl.dev.warp_id())
+        tl.store(cpu_ptr + pid * N + i, tl.dev.current_cpu())
+        tl.store(tid_ptr + pid * N + i, tl.dev.os_thread_id())
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+@pytest.mark.parametrize("num_warps", [1, 3, 4])
+def test_warp_id(device, num_warps):
+    from triton.backends.triton_shared import cpu_runtime
+
+    grid, n = 3, 24
+    warp = torch.full((grid, n), -1, dtype=torch.int32)
+    cpu = torch.zeros((grid, n), dtype=torch.int32)
+    tid = torch.zeros((grid, n), dtype=torch.int32)
+    _warp_kernel[(grid,)](warp, cpu, tid, N=n, num_warps=num_warps)
+    slots = [cpu_runtime.slot_cpus(num_warps, s) for s in range(cpu_runtime.num_slots(num_warps))]
+    for p in range(grid):
+        ws, cs, ts = warp[p].tolist(), cpu[p].tolist(), tid[p].tolist()
+        slot = next(s for s in slots if cs[0] in s)
+        assert set(ws) <= set(range(num_warps))
+        for w, c, t in zip(ws, cs, ts):
+            # The warp is the position of the CPU in the slot, one OS thread each.
+            assert slot[w] == c
+            assert t == ts[ws.index(w)]

@@ -137,6 +137,7 @@ public:
     // (backend/runtime/triton_cpu_rt.h). An external func.call has unknown
     // effects, so later passes keep every call where it is, and the
     // declaration carries no memory attribute that would let LLVM merge them.
+    lowerThreadQuery<triton::DevWarpIdOp>(moduleOp, "tcrt_warp_id");
     lowerThreadQuery<triton::DevCurrentCpuOp>(moduleOp, "tcrt_current_cpu");
     lowerThreadQuery<triton::DevOsThreadIdOp>(moduleOp, "tcrt_os_thread_id");
   }
