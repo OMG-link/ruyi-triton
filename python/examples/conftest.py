@@ -19,6 +19,41 @@ def device(request):
     return "cpu"
 
 
+# Program instances run concurrently (docs/09-Program-Instance-Parallelism.md).
+# A kernel that is only correct when they run one after the other is marked
+# `serial_grid(reason)`; its test runs in a child process whose runtime has a
+# single compute CPU (TRITON_CPAR_CPUS), because the runtime's configuration
+# is fixed per process at its first launch.
+_SERIAL_CHILD = "_TRITON_SERIAL_GRID_CHILD"
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "serial_grid(reason): the kernels under test are wrong when program "
+        "instances run concurrently; run the test with a single compute CPU",
+    )
+
+
+def pytest_pyfunc_call(pyfuncitem):
+    marker = pyfuncitem.get_closest_marker("serial_grid")
+    if marker is None or os.environ.get(_SERIAL_CHILD):
+        return None
+    import subprocess
+    import sys
+
+    cpu = sorted(os.sched_getaffinity(0))[0]
+    env = {**os.environ, _SERIAL_CHILD: "1", "TRITON_CPAR_CPUS": str(cpu)}
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         "-p", "no:xdist", pyfuncitem.nodeid],
+        cwd=pyfuncitem.config.rootpath, env=env, capture_output=True, text=True)
+    if result.returncode != 0:
+        pytest.fail(f"serial_grid child failed:\n{result.stdout}\n{result.stderr}",
+                    pytrace=False)
+    return True
+
+
 # this fixture is used for test_enable_fp_fusion
 @pytest.fixture
 def fresh_knobs():

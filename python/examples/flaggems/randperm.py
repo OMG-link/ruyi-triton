@@ -210,6 +210,11 @@ def radix_sortbykey_scatter_kernel(
             rd_lbk_offset = (
                 (portion_id * passes + p) * max_tiles_per_portion + bk
             ) * bins + bin_id
+            # Wrong when program instances run concurrently: this spins on a
+            # plain load of a flag another instance writes, which the
+            # compiler may hoist out of the loop, so the wait never ends.
+            # It only works when the instances run one after the other
+            # (test_randperm.py runs it with one compute CPU).
             partial_prefix = tl.load(d_lookback + rd_lbk_offset)
             while partial_prefix == 0:
                 partial_prefix = tl.load(d_lookback + rd_lbk_offset)

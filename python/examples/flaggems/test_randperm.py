@@ -1,7 +1,10 @@
 import pytest
 import torch
 
+
 from .randperm import randperm
+
+pytestmark = pytest.mark.serial_grid("the radix sort look-back spins on a flag another program instance writes")
 
 
 @pytest.mark.parametrize("n", [10, 1024, 2050])

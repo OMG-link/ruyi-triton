@@ -1,3 +1,7 @@
+# Wrong when program instances run concurrently and `index` holds duplicate
+# positions: the instances that write the same output element race, and which
+# value survives depends on timing. torch.scatter keeps the last one, which a
+# serial grid happens to reproduce (test_scatter.py runs with one compute CPU).
 import enum
 import importlib
 import os

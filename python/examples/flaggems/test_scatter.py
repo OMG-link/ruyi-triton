@@ -1,7 +1,10 @@
 import pytest
 import torch
 
+
 from .scatter import scatter, scatter_
+
+pytestmark = pytest.mark.serial_grid("scatter with duplicate indices races between program instances")
 
 
 @pytest.mark.parametrize("size", [512, 1023, 1024])
