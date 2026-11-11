@@ -36,14 +36,18 @@ kernel[(grid,)](x, out, sums, N=4096, BLOCK=128, num_warps=4)
   the iteration starting at `start + i`:
 
   ```python
+  W: tl.constexpr = tl.dev.num_threads()
   scratch = tl.dev.alloc((W, BLOCK), tl.float32, placement="local")
   for i in tl.dev.parallel(0, N, BLOCK):
       mine = scratch + ((i // BLOCK) % W) * BLOCK   # this thread's row
       ...
   ```
 
-  `W` is the kernel's resolved `num_warps`; pass it as a `tl.constexpr`
-  equal to `num_warps`.
+  `tl.dev.num_threads()` (patch 0017) is the kernel's resolved `num_warps`
+  as a `tl.constexpr`, like Gluon's `gl.num_warps()`. A loop
+  `for t in tl.dev.parallel(0, tl.dev.num_threads())` gives one iteration
+  per thread, `t` being the thread, which is how a kernel splits work the
+  way an OpenMP `parallel for schedule(static)` does.
 * The body must not assign to a variable defined before the loop: there is
   no value to carry between iterations (compile error). Writes of different
   iterations to the same element race; nothing checks for it.

@@ -313,3 +313,52 @@ def test_thread_queries(device):
         assert serial[p].tolist() == [row_cpus[0], row_tids[0]]
     # The queries ran on workers, never on the calling thread.
     assert threading.get_native_id() not in tids.flatten().tolist()
+
+
+# --------------------------------------------------------------------------
+# tl.dev.num_threads
+# --------------------------------------------------------------------------
+
+
+@triton.jit
+def _per_thread_kernel(out_ptr, threads_ptr, N: tl.constexpr, BLOCK: tl.constexpr):
+    # One row of scratch per thread, split by thread as an OpenMP static
+    # schedule does: thread t owns a contiguous range of the N blocks.
+    T: tl.constexpr = tl.dev.num_threads()
+    NB: tl.constexpr = N // BLOCK
+    scratch = tl.dev.alloc((T, BLOCK), tl.float32, placement="local")
+    tl.store(threads_ptr, T)
+    offs = tl.arange(0, BLOCK)
+    for t in tl.dev.parallel(0, T):
+        mine = scratch + t * BLOCK
+        start = t * (NB // T) + tl.minimum(t, NB % T)
+        count = NB // T + (t < NB % T).to(tl.int32)
+        for b in range(start, start + count):
+            tl.store(mine + offs, (b * BLOCK + offs).to(tl.float32))
+            tl.store(out_ptr + b * BLOCK + offs, tl.load(mine + offs) * 2.0 + t)
+
+
+@pytest.mark.parametrize("num_warps", [1, 3, 4])
+def test_num_threads(device, num_warps):
+    n, block = 20 * 16, 16
+    out = torch.empty(n)
+    threads = torch.zeros(1, dtype=torch.int32)
+    compiled = _per_thread_kernel[(1,)](out, threads, N=n, BLOCK=block, num_warps=num_warps)
+    assert threads.item() == num_warps == compiled.metadata.num_warps
+    # Block b belongs to the thread whose contiguous range contains it.
+    nb = n // block
+    owner = [t for t in range(num_warps)
+             for _ in range(nb // num_warps + (t < nb % num_warps))]
+    ref = torch.cat([torch.arange(b * block, (b + 1) * block, dtype=torch.float32) * 2.0
+                     + owner[b] for b in range(nb)])
+    torch.testing.assert_close(out, ref)
+
+
+def test_num_threads_default_is_one_cluster(device):
+    from triton.backends.triton_shared import board
+
+    out = torch.empty(64)
+    threads = torch.zeros(1, dtype=torch.int32)
+    compiled = _per_thread_kernel[(1,)](out, threads, N=64, BLOCK=16)
+    assert threads.item() == compiled.metadata.num_warps == board.cluster_size(
+        compiled.metadata.board_config)

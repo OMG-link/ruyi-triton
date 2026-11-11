@@ -1,0 +1,26 @@
+diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
+index 591dddb333..81528e8d5f 100644
+--- a/python/triton/language/dev.py
++++ b/python/triton/language/dev.py
+@@ -12,7 +12,20 @@ import builtins
+ from .core import _unwrap_if_constexpr, base_value, builtin, constexpr
+ from .core import tuple as _tl_tuple
+ 
+-__all__ = ["alloc", "current_cpu", "os_thread_id", "parallel", "sched_barrier", "shuffle"]
++__all__ = ["alloc", "current_cpu", "num_threads", "os_thread_id", "parallel", "sched_barrier", "shuffle"]
++
++
++@builtin
++def num_threads(_semantic=None):
++    """A dev op that returns the number of threads of a program instance.
++
++    It is the kernel's resolved ``num_warps``, as a :code:`tl.constexpr`:
++    the threads a :code:`tl.dev.parallel` loop is distributed over, for
++    sizing per-thread buffers and splitting work by thread, e.g.
++    ``for t in tl.dev.parallel(0, tl.dev.num_threads())``. It is a compile-time
++    value; a different ``num_warps`` recompiles the kernel.
++    """
++    return constexpr(_semantic.builder.options.num_warps)
+ 
+ 
+ @builtin
