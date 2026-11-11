@@ -20,7 +20,8 @@
 //
 // Structure:
 //   * Configuration: the compute CPUs of the board configuration, grouped
-//     into domains (CPUs sharing an L2 cache), given by tcrt_configure().
+//     into domains (CPUs sharing a cache: the board configuration's L2
+//     groups, or what TRITON_CPAR_CPUS lists), given by tcrt_configure().
 //     Nothing about the board is detected here; backend/board.py does it.
 //   * AI cores (SpacemiT K3): the A100 cores are outside the affinity of
 //     ordinary threads; a thread gets access to them, and loses access to the
@@ -348,7 +349,7 @@ struct Pool {
   Worker *spmHolder = nullptr;
   // Slot layouts per number of warps, in launch order (round robin over the
   // domains, so that a launch with fewer instances than slots spreads over
-  // the clusters). Built on first use, kept for the lifetime of the pool.
+  // the domains). Built on first use, kept for the lifetime of the pool.
   std::map<int, std::vector<Slot *>> layouts;
 };
 
@@ -602,8 +603,8 @@ const std::vector<Slot *> &getLayout(Pool &pool, int warps) {
   }
   if (crosses)
     warnOnce(warnedCross,
-             "the threads of a program instance span several L2 domains "
-             "(num_warps is larger than a cluster)");
+             "the threads of a program instance span several domains of the "
+             "CPU configuration (num_warps is larger than a domain)");
 
   std::vector<Slot *> layout;
   for (size_t i = 0;; ++i) {

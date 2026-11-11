@@ -62,9 +62,9 @@ CPUs, because a thread moved there can no longer reach other cores.
   current domain is too small for another slot, the next slot starts at the
   next domain and the rest stays idle. A slot larger than a domain starts at
   a domain boundary and spans the following domains, with a warning, since
-  its threads then do not share one L2. A slot never has more CPUs than the
+  its threads then do not share one domain's cache. A slot never has more CPUs than the
   configuration; the kernel still sees W threads. Slots are handed out round
-  robin over the domains, so a small grid spreads over the clusters.
+  robin over the domains, so a small grid spreads over the domains.
 * **Launch.** The calling thread posts the grid to the leaders (first
   workers) of up to as many slots as there are program instances. Leaders
   take instances from an atomic counter, one at a time, and count down a

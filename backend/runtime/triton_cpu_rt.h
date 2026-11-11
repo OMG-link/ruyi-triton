@@ -50,7 +50,7 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // The compute CPUs of a board configuration, in order, partitioned into
-// domains of consecutive entries (CPUs sharing an L2 cache).
+// domains of consecutive entries (CPUs sharing a cache).
 typedef struct {
   int abi_version; // TCRT_ABI_VERSION
   int ncpus;
