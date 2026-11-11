@@ -1,0 +1,146 @@
+diff --git a/include/triton/Dialect/Triton/IR/Dialect.h b/include/triton/Dialect/Triton/IR/Dialect.h
+index 40dafdb40a..fa52fce324 100644
+--- a/include/triton/Dialect/Triton/IR/Dialect.h
++++ b/include/triton/Dialect/Triton/IR/Dialect.h
+@@ -35,6 +35,15 @@ struct SchedBarrierResource
+   StringRef getName() const { return "<SchedBarrierResource>"; }
+ };
+ 
++// The executing thread's identity (CPU, OS thread). Queries of it write the
++// resource so that no pass merges or hoists them: their value depends on the
++// thread that runs them. No other op touches it.
++struct ThreadIdentityResource
++    : public SideEffects::Resource::Base<ThreadIdentityResource> {
++  StringRef getName() { return "<ThreadIdentityResource>"; }
++  StringRef getName() const { return "<ThreadIdentityResource>"; }
++};
++
+ class DialectInferLayoutInterface
+     : public DialectInterface::Base<DialectInferLayoutInterface> {
+ public:
+diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
+index b4fb8e03a9..8a9c7e155e 100644
+--- a/include/triton/Dialect/Triton/IR/TritonOps.td
++++ b/include/triton/Dialect/Triton/IR/TritonOps.td
+@@ -710,6 +710,24 @@ def TT_DevShuffleOp : TT_Op<"dev.shuffle", [Pure]> {
+     let hasVerifier = 1;
+ }
+ 
++class TT_DevThreadQueryOp<string mnemonic, string what>
++    : TT_Op<mnemonic, [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
++    let summary = "query the " # what # " of the executing thread";
++    let description = [{
++      Returns the }] # what # [{ of the thread that executes the op, as i32.
++      Two queries are never merged or moved across loops, because their
++      values depend on the thread that runs them. This frontend operation is
++      a dev op for inspecting where a kernel runs; the backend lowers it to a
++      call of its runtime.
++    }];
++    let results = (outs I32:$result);
++    let assemblyFormat = "attr-dict `:` type($result)";
++}
++
++def TT_DevCurrentCpuOp : TT_DevThreadQueryOp<"dev.current_cpu", "CPU">;
++def TT_DevOsThreadIdOp
++    : TT_DevThreadQueryOp<"dev.os_thread_id", "operating system thread id">;
++
+ def TT_DevSchedBarrierOp : TT_Op<"dev.sched_barrier",
+                               [DeclareOpInterfaceMethods<
+                                   MemoryEffectsOpInterface>]> {
+diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
+index 3d352a36b9..2b5ea7b12c 100644
+--- a/lib/Dialect/Triton/IR/Ops.cpp
++++ b/lib/Dialect/Triton/IR/Ops.cpp
+@@ -242,6 +242,21 @@ LogicalResult DevSchedBarrierOp::verify() {
+   return success();
+ }
+ 
++//-- DevCurrentCpuOp / DevOsThreadIdOp --
++void DevCurrentCpuOp::getEffects(
++    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
++        &effects) {
++  effects.emplace_back(MemoryEffects::Write::get(),
++                       ThreadIdentityResource::get());
++}
++
++void DevOsThreadIdOp::getEffects(
++    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
++        &effects) {
++  effects.emplace_back(MemoryEffects::Write::get(),
++                       ThreadIdentityResource::get());
++}
++
+ void DevSchedBarrierOp::getEffects(
+     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+         &effects) {
+diff --git a/python/src/ir.cc b/python/src/ir.cc
+index 5f6d2bbb6f..13908d7822 100644
+--- a/python/src/ir.cc
++++ b/python/src/ir.cc
+@@ -1739,6 +1739,16 @@ void init_triton_ir(py::module &&m) {
+                  shape, type.getElementType(), type.getEncoding());
+              return self.create<DevShuffleOp>(resultType, v1, v2, mask);
+            })
++      .def("create_dev_current_cpu",
++           [](TritonOpBuilder &self) -> Value {
++             return self.create<DevCurrentCpuOp>(
++                 self.getBuilder().getI32Type());
++           })
++      .def("create_dev_os_thread_id",
++           [](TritonOpBuilder &self) -> Value {
++             return self.create<DevOsThreadIdOp>(
++                 self.getBuilder().getI32Type());
++           })
+       .def("create_get_num_programs",
+            [](TritonOpBuilder &self, int axis) -> Value {
+              if (axis < 0 || axis > 3)
+diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
+index 232cbd792c..591dddb333 100644
+--- a/python/triton/language/dev.py
++++ b/python/triton/language/dev.py
+@@ -12,7 +12,27 @@ import builtins
+ from .core import _unwrap_if_constexpr, base_value, builtin, constexpr
+ from .core import tuple as _tl_tuple
+ 
+-__all__ = ["alloc", "parallel", "sched_barrier", "shuffle"]
++__all__ = ["alloc", "current_cpu", "os_thread_id", "parallel", "sched_barrier", "shuffle"]
++
++
++@builtin
++def current_cpu(_semantic=None):
++    """A dev op that returns the CPU the executing thread runs on, as int32.
++
++    Inside a :code:`tl.dev.parallel` loop it is the CPU of the thread that
++    runs the iteration. For inspecting where a kernel runs; -1 if unknown.
++    """
++    return _semantic.dev_current_cpu()
++
++
++@builtin
++def os_thread_id(_semantic=None):
++    """A dev op that returns the operating system id of the executing thread.
++
++    Inside a :code:`tl.dev.parallel` loop it is the thread that runs the
++    iteration. For inspecting where a kernel runs (Linux: ``gettid``).
++    """
++    return _semantic.dev_os_thread_id()
+ 
+ 
+ class parallel(base_value):
+diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
+index fb5efeea69..ce89769b50 100644
+--- a/python/triton/language/semantic.py
++++ b/python/triton/language/semantic.py
+@@ -84,6 +84,12 @@ class TritonSemantic(Generic[TensorTy]):
+         wrapped = tuple(self.tensor(value, tensor.type) for value, tensor in zip(results, tensors))
+         return wrapped[0] if len(wrapped) == 1 else wrapped
+ 
++    def dev_current_cpu(self) -> TensorTy:
++        return self.tensor(self.builder.create_dev_current_cpu(), tl.int32)
++
++    def dev_os_thread_id(self) -> TensorTy:
++        return self.tensor(self.builder.create_dev_os_thread_id(), tl.int32)
++
+     def dev_shuffle(self, v1: TensorTy, v2: TensorTy, mask) -> TensorTy:
+         for value in (v1, v2):
+             if not isinstance(value, tl.tensor) or not value.type.is_block():

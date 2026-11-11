@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 
 import pytest
 import torch
@@ -270,3 +271,45 @@ def test_nested_parallel_loops(device):
     out = torch.full((8 * 16,), -1, dtype=torch.int32)
     _nested_kernel[(1,)](out, N=8, M=16, num_warps=4)
     torch.testing.assert_close(out, torch.arange(8 * 16, dtype=torch.int32))
+
+
+# --------------------------------------------------------------------------
+# tl.dev.current_cpu / tl.dev.os_thread_id
+# --------------------------------------------------------------------------
+
+
+@triton.jit
+def _where_kernel(cpu_ptr, tid_ptr, serial_ptr, N: tl.constexpr):
+    pid = tl.program_id(0)
+    for i in tl.dev.parallel(0, N):
+        tl.store(cpu_ptr + pid * N + i, tl.dev.current_cpu())
+        tl.store(tid_ptr + pid * N + i, tl.dev.os_thread_id())
+    tl.store(serial_ptr + pid * 2, tl.dev.current_cpu())
+    tl.store(serial_ptr + pid * 2 + 1, tl.dev.os_thread_id())
+
+
+def test_thread_queries(device):
+    from triton.backends.triton_shared import cpu_runtime
+
+    grid, n, warps = 3, 16, 4
+    cpus = torch.full((grid, n), -2, dtype=torch.int32)
+    tids = torch.zeros((grid, n), dtype=torch.int32)
+    serial = torch.zeros((grid, 2), dtype=torch.int32)
+    _where_kernel[(grid,)](cpus, tids, serial, N=n, num_warps=warps)
+    slots = [cpu_runtime.slot_cpus(warps, s) for s in range(cpu_runtime.num_slots(warps))]
+    width = len(slots[0])
+    for p in range(grid):
+        row_cpus, row_tids = cpus[p].tolist(), tids[p].tolist()
+        # All iterations of an instance ran on the CPUs of one slot.
+        slot = next(s for s in slots if row_cpus[0] in s)
+        assert set(row_cpus) <= set(slot)
+        # Iteration i runs on thread i % W, which shares an OS thread with
+        # i % width when the slot is smaller than W.
+        for i in range(n):
+            assert row_tids[i] == row_tids[i % warps % width]
+            assert row_cpus[i] == row_cpus[i % warps % width]
+        assert len(set(row_tids)) == min(width, warps)
+        # The code after the loop runs on the thread of logical id 0.
+        assert serial[p].tolist() == [row_cpus[0], row_tids[0]]
+    # The queries ran on workers, never on the calling thread.
+    assert threading.get_native_id() not in tids.flatten().tolist()

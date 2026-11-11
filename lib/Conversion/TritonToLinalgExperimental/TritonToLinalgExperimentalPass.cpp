@@ -132,6 +132,37 @@ public:
       op.replaceAllUsesWith(lowered.getResult());
       op.erase();
     }
+
+    // Thread queries become calls of the CPU runtime's functions
+    // (backend/runtime/triton_cpu_rt.h). An external func.call has unknown
+    // effects, so later passes keep every call where it is, and the
+    // declaration carries no memory attribute that would let LLVM merge them.
+    lowerThreadQuery<triton::DevCurrentCpuOp>(moduleOp, "tcrt_current_cpu");
+    lowerThreadQuery<triton::DevOsThreadIdOp>(moduleOp, "tcrt_os_thread_id");
+  }
+
+private:
+  template <typename OpTy>
+  static void lowerThreadQuery(ModuleOp moduleOp, StringRef callee) {
+    SmallVector<OpTy> queries;
+    moduleOp.walk([&](OpTy op) { queries.push_back(op); });
+    if (queries.empty())
+      return;
+    auto type =
+        FunctionType::get(moduleOp.getContext(), {},
+                          {IntegerType::get(moduleOp.getContext(), 32)});
+    auto decl = moduleOp.lookupSymbol<func::FuncOp>(callee);
+    if (!decl) {
+      OpBuilder builder(moduleOp.getBodyRegion());
+      decl = func::FuncOp::create(builder, moduleOp.getLoc(), callee, type);
+      decl.setPrivate();
+    }
+    for (OpTy op : queries) {
+      OpBuilder builder(op);
+      auto call = func::CallOp::create(builder, op.getLoc(), decl);
+      op.replaceAllUsesWith(call.getResult(0));
+      op.erase();
+    }
   }
 };
 } // namespace

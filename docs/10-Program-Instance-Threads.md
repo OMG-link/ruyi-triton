@@ -115,6 +115,16 @@ workers of the slot (helper `m` runs `m, m + S, ...`). Called anywhere else
 (single CPU slot, nested region, outside a launch) it runs the ids one after
 the other on the calling thread. The kernel always sees `nthreads = W`.
 
+## Where a kernel runs
+
+`tl.dev.current_cpu()` and `tl.dev.os_thread_id()` (patch 0016) return, as
+int32, the CPU (`sched_getcpu`) and Linux thread id of the thread executing
+the call; inside a `tl.dev.parallel` loop, of the thread running the
+iteration. They are `tt.dev.current_cpu` / `tt.dev.os_thread_id`, which write
+a dedicated resource so that no pass merges or hoists them, and
+triton-shared lowers them to calls of the runtime's `tcrt_current_cpu` /
+`tcrt_os_thread_id`.
+
 ## Trace
 
 `<TRITON_CPAR_TRACE_FILE>.threads`: one row per call `fn(ctx, tid, nthreads)`,
