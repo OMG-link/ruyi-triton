@@ -93,7 +93,15 @@ def matmul(a, b, activation=""):
     # buffers.  Prefer the largest aligned tile so those buffers and the
     # launcher are reused for more arithmetic, while retaining the original
     # 32x64 minimum tile for smaller shapes.
-    openmp_threads = max(1, int(os.getenv("TRITON_RISCV_OPENMP_THREADS", "1")))
+    # Program instances run concurrently on the CPU runtime's workers.
+    from triton.backends.triton_shared import board
+
+    cpar_cpus = os.getenv("TRITON_CPAR_CPUS")
+    openmp_threads = (
+        sum(len(d) for d in board.parse_domains(cpar_cpus))
+        if cpar_cpus
+        else len(os.sched_getaffinity(0))
+    )
     block_m_cap = max(32, 512 // openmp_threads)
     block_size_m = next(
         (

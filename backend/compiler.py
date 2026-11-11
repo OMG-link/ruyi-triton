@@ -14,6 +14,7 @@ import functools
 import triton
 from pathlib import Path
 
+from . import board
 from .paths import _get_buddy_opt_path, _get_llvm_bin_path, _get_triton_shared_opt_path
 from .riscv import DEFAULT_LLC_FEATURES
 
@@ -44,19 +45,46 @@ def _use_ime_pipeline() -> bool:
     return os.getenv("TRITON_RISCV_USE_IME", "") == "1"
 
 
-def _get_openmp_num_threads() -> int:
-    value = os.getenv("TRITON_RISCV_OPENMP_THREADS", "0")
-    if value == "":
-        return 0
-    try:
-        threads = int(value)
-    except ValueError as exc:
-        raise ValueError(
-            "TRITON_RISCV_OPENMP_THREADS must be an integer thread count"
-        ) from exc
-    if threads < 0:
-        raise ValueError("TRITON_RISCV_OPENMP_THREADS must be non-negative")
-    return threads
+# ----------------------- Threads per program instance -----------------------
+# `num_warps` is the number of threads of a program instance: used as is when
+# > 0, and one cluster of the kernel's board configuration (board.py) when 0.
+# The resolved value is the kernel's num_warps. tl.dev.parallel loops are
+# distributed over that many threads (buddy-mlir --cpar-distribute-loops,
+# --cpar-forall-to-parallel and --cpar-outline-to-runtime). The runtime
+# reserves CPUs for the threads only if the kernel actually forks a parallel
+# region (metadata["cpu_threads"], see pack_metadata).
+
+# Fork/join entry point of the CPU runtime (backend/runtime).
+_CPAR_RUNTIME_SYMBOL = "__cpar_parallel"
+
+
+def _resolve_num_warps(num_warps, config_name) -> int:
+    num_warps = int(num_warps or 0)
+    if num_warps < 0:
+        raise ValueError(f"num_warps must be >= 0, got {num_warps}")
+    return num_warps if num_warps > 0 else board.cluster_size(config_name)
+
+
+def _cpar_distribute_args(options) -> list:
+    """Distributes tl.dev.parallel loops; runs on tensors, before bufferization.
+
+    The distributed loop is an scf.forall, which One-Shot Bufferize treats as
+    a parallel region, so every thread gets private buffers for what it
+    writes.
+    """
+    return [f"--cpar-distribute-loops=num-threads={getattr(options, 'num_warps', 1) or 1}"]
+
+
+def _record_cpu_threads(llir: str, metadata, options) -> str:
+    """Threads the runtime reserves per program instance.
+
+    num_warps if the kernel forks parallel regions, 1 otherwise: a kernel
+    without parallel region would leave the other CPUs of its slot idle.
+    """
+    forks = re.search(rf"\bcall void @{_CPAR_RUNTIME_SYMBOL}\(", llir) is not None
+    metadata["cpu_threads"] = options.num_warps if forks else 1
+    metadata["board_config"] = options.board_config
+    return llir
 
 
 def _dump_ir_if_needed(files):
@@ -118,8 +146,8 @@ def _record_spm(ttsharedir: str, metadata, options) -> str:
     """Copy the kernel's scratchpad requirement into its metadata.
 
     TritonPtrToMemref records it on the function when the kernel uses
-    tl.dev.alloc(placement="spm"); the launcher acquires that many bytes from the
-    board's SPM driver. A compile target known not to fit gets a warning only:
+    tl.dev.alloc(placement="spm"); the runtime gives every program instance
+    its slot's share of the board's scratchpad. A compile target known not to fit gets a warning only:
     the requirement is checked again, for real, at launch.
     """
     found = dict(_SPM_ATTR.findall(ttsharedir))
@@ -132,7 +160,8 @@ def _record_spm(ttsharedir: str, metadata, options) -> str:
         spm.warn_if_unlikely_to_run(
             kernel.group(1) if kernel else "?",
             metadata["spm_size"],
-            options.target_cpu if options is not None else None,
+            board.CONFIGS[options.board_config],
+            options.num_warps,
         )
     return ttsharedir
 
@@ -159,6 +188,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
             # then cross-compiles to a RISC-V ELF object with +xsmtvdot (K1 IME).
             # ---------------------------------------------------------------
             ime_lowering_passes = [
+                *_cpar_distribute_args(options),
                 *_tile_to_vector_args(options, ime=True),
                 # Bufferize tensor ops before IME lowering
                 "--empty-tensor-to-alloc-tensor",
@@ -167,6 +197,8 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                 # memrefs. Insert and lower their deallocations while the
                 # memref-level ownership information is still available.
                 "--buffer-deallocation-pipeline",
+                # The thread foralls become cpar.parallel regions.
+                "--cpar-forall-to-parallel",
                 # Lower linalg.matmul (memref) → ime.vfmadot / ime.vmadot
                 "--lower-linalg-to-ime",
                 # Lower IME dialect → vector / loop ops
@@ -194,6 +226,9 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                 "--lower-affine",
                 "--convert-arith-to-llvm",
                 "--reconcile-unrealized-casts",
+                # Outline cpar.parallel regions into functions called through
+                # the runtime's __cpar_parallel (needs pure LLVM dialect).
+                "--cpar-outline-to-runtime",
             ]
 
             buddy_input_path = ttshared_path
@@ -270,10 +305,12 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                     # turns every intermediate and scalar broadcast into a
                     # separate temporary buffer.
                     "--linalg-fuse-elementwise-ops",
+                    *_cpar_distribute_args(options),
                     *_tile_to_vector_args(options),
                     "--empty-tensor-to-alloc-tensor",
                     "--one-shot-bufferize=allow-return-allocs-from-loops=true",
                     "--buffer-deallocation-pipeline",
+                    "--cpar-forall-to-parallel",
                     "--eliminate-memref-copy",
                     # Triton programs commonly materialize small, statically
                     # sized tiles for loads and scalar broadcasts.  Paying for
@@ -304,6 +341,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                     "--convert-arith-to-llvm",
                     # Remove all unrealized casts created
                     "--reconcile-unrealized-casts",
+                    "--cpar-outline-to-runtime",
                     "--mlir-print-debuginfo",
                     "-o",
                     llmlir_path,
@@ -766,10 +804,13 @@ def _find_kernel_name(llir: str) -> str:
     to the module.  Helpers are called by the kernel, whereas the kernel is the
     sole definition that is not called from within the module.
     """
+    # Functions with local linkage (e.g. outlined parallel regions, whose
+    # address is passed to __cpar_parallel) are never entry points.
     definitions = {
         quoted or unquoted
         for quoted, unquoted in re.findall(
-            rf"^define\b[^@\n]*@{_LLVM_SYMBOL}\s*\(", llir, re.MULTILINE
+            rf"^define\b(?![^@\n]*\b(?:internal|private)\b)[^@\n]*@{_LLVM_SYMBOL}\s*\(",
+            llir, re.MULTILINE
         )
     }
     callees = {
@@ -891,7 +932,8 @@ class CPUOptions:
     target_features: str = None
     target_cpu: str = None
     riscv_vlen: int = None
-    openmp_num_threads: int = 0
+    # Name of the board configuration the kernel runs with (board.py).
+    board_config: str = None
     allow_fp_reassoc: bool = False
 
     def __post_init__(self):
@@ -917,8 +959,10 @@ class CPUBackend(BaseBackend):
         args.update(
             {k: opts[k] for k in CPUOptions.__dataclass_fields__.keys() if k in opts}
         )
-        args.setdefault("openmp_num_threads", _get_openmp_num_threads())
         _resolve_target(args)
+        if not args.get("board_config"):
+            args["board_config"] = board.config_for_target(args.get("target_cpu")).name
+        args["num_warps"] = _resolve_num_warps(args.get("num_warps"), args["board_config"])
         options = CPUOptions(**args)
         if _use_ime_pipeline():
             _check_ime_target(options)
@@ -940,6 +984,8 @@ class CPUBackend(BaseBackend):
             metadata.cluster_dims[1],
             metadata.cluster_dims[2],
             metadata.name,
+            metadata.cpu_threads,
+            metadata.board_config,
         )
 
     # Our compilation pipeline isn't in python like nvidia or amd, no need to load
@@ -969,7 +1015,8 @@ class CPUBackend(BaseBackend):
         stages["ttsharedir"] = lambda src, metadata: _record_spm(
             _ttir_to_ttsharedir(src), metadata, options)
         stages["ttsharedir.opt"] = lambda src, metadata: _optimize_ttsharedir(src)
-        stages["llir"] = lambda src, metadata: _ttsharedir_to_llir(src, options)
+        stages["llir"] = lambda src, metadata: _record_cpu_threads(
+            _ttsharedir_to_llir(src, options), metadata, options)
         stages["llir.opt"] = lambda src, metadata: _optimize_llir(src, options)
         stages["obj"] = lambda src, metadata: _llir_to_bin(src, metadata, options)
 

@@ -160,7 +160,10 @@ def main():
     env["OMP_NUM_THREADS"] = str(benchmark_threads)
     env["MKL_NUM_THREADS"] = str(benchmark_threads)
     env["TORCH_NUM_THREADS"] = str(benchmark_threads)
-    env.setdefault("TRITON_RISCV_OPENMP_THREADS", str(benchmark_threads))
+    # The CPU runtime runs program instances on the CPUs TRITON_CPAR_CPUS
+    # lists; use the first `benchmark_threads` CPUs of the process.
+    cpus = sorted(os.sched_getaffinity(0))[:benchmark_threads]
+    env.setdefault("TRITON_CPAR_CPUS", ",".join(map(str, cpus)))
 
     scripts = sorted(perf_dir.glob("test_performance_*.py"))
     if args.cases:

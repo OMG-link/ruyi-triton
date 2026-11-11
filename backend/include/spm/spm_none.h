@@ -1,23 +1,37 @@
-// Scratchpad driver for boards without one: every acquire fails.
+//===- spm_none.h - Scratchpad driver for boards without one ----*- C -*-===//
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//===----------------------------------------------------------------------===//
+//
+// Every acquisition fails.
+//
+//===----------------------------------------------------------------------===//
+
 #ifndef TRITON_RISCV_SPM_DRIVER_H
 #define TRITON_RISCV_SPM_DRIVER_H
 
 #include "spm_common.h"
 
-static int triton_riscv_spm_acquire(size_t bytes, size_t align,
-                                    spm_lease_t *lease) {
-  (void)bytes;
-  (void)align;
-  lease->base = NULL;
-  lease->cpu = -1;
-  lease->domain = -1;
-  lease->blocks[0] = lease->blocks[1] = -1;
-  lease->busy_block = -1;
-  lease->sys_errno = 0;
-  lease->pinned = 0;
+static int spm_hold(spm_hold_t *hold) {
+  hold->base = NULL;
+  hold->bytes = 0;
+  hold->busy_block = -1;
+  hold->sys_errno = 0;
+  hold->blocks_held = 0;
   return SPM_ERR_NO_DRIVER;
 }
 
-static void triton_riscv_spm_release(spm_lease_t *lease) { (void)lease; }
+static void spm_release(spm_hold_t *hold) { (void)hold; }
 
 #endif

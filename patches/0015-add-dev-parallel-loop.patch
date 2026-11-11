@@ -1,0 +1,169 @@
+diff --git a/python/src/ir.cc b/python/src/ir.cc
+index 2f5b962371..5f6d2bbb6f 100644
+--- a/python/src/ir.cc
++++ b/python/src/ir.cc
+@@ -606,6 +606,15 @@ void init_triton_ir(py::module &&m) {
+   py::class_<scf::ForOp, OpState>(m, "ForOp", py::module_local())
+       .def("get_induction_var", &scf::ForOp::getInductionVar);
+ 
++  py::class_<scf::ForallOp, OpState>(m, "ForallOp", py::module_local())
++      .def(
++          "get_forall_body",
++          [](scf::ForallOp &self) -> Block * { return self.getBody(); },
++          ret::reference)
++      .def("get_induction_var", [](scf::ForallOp &self) -> Value {
++        return self.getInductionVar(0);
++      });
++
+   py::class_<scf::IfOp, OpState>(m, "IfOp", py::module_local())
+       .def("get_then_block", &scf::IfOp::thenBlock, ret::reference)
+       .def("get_else_block", &scf::IfOp::elseBlock, ret::reference)
+@@ -1169,6 +1178,24 @@ void init_triton_ir(py::module &&m) {
+               std::vector<Value> &initArgs) -> scf::ForOp {
+              return self.create<scf::ForOp>(lb, ub, step, initArgs);
+            })
++      // A 1-d scf.forall over the integer range [lb, ub) with `step`, without
++      // shared_outs; the bounds are cast to index.
++      .def("create_forall_op",
++           [](TritonOpBuilder &self, Value &lb, Value &ub,
++              Value &step) -> scf::ForallOp {
++             Type index = self.getBuilder().getIndexType();
++             auto toIndex = [&](Value v) -> OpFoldResult {
++               return self.create<arith::IndexCastOp>(index, v).getResult();
++             };
++             SmallVector<OpFoldResult> lbs{toIndex(lb)}, ubs{toIndex(ub)},
++                 steps{toIndex(step)};
++             return self.create<scf::ForallOp>(lbs, ubs, steps, ValueRange{},
++                                               std::nullopt);
++           })
++      .def("create_index_cast",
++           [](TritonOpBuilder &self, Value &val, Type &type) -> Value {
++             return self.create<arith::IndexCastOp>(type, val);
++           })
+       .def("create_if_op",
+            [](TritonOpBuilder &self, std::vector<Type> &retTypes,
+               Value &condition, bool withElse) -> scf::IfOp {
+diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
+index 1829a04a89..0f81cb9668 100644
+--- a/python/triton/compiler/code_generator.py
++++ b/python/triton/compiler/code_generator.py
+@@ -1214,6 +1214,8 @@ class CodeGenerator(ast.NodeVisitor):
+                 for stmt in node.orelse:
+                     ast.NodeVisitor.generic_visit(self, stmt)
+             return
++        if IteratorClass is language.dev.parallel:
++            return self._visit_parallel_for(node, IteratorClass(*iter_args, **iter_kwargs))
+         num_stages = None
+         loop_unroll_factor = None
+         disallow_acc_multi_buffer = False
+@@ -1338,6 +1340,51 @@ class CodeGenerator(ast.NodeVisitor):
+             assert False, "Don't know what to do with else after for"
+             ast.NodeVisitor.generic_visit(self, stmt)
+ 
++    def _visit_parallel_for(self, node, iterator):
++        """A tl.dev.parallel loop: an scf.forall without shared outputs."""
++        if node.orelse:
++            raise self._unsupported(node, "tl.dev.parallel loops cannot have an else clause")
++        if _is_constexpr(iterator.step) and iterator.step.value <= 0:
++            raise self._unsupported(node, "tl.dev.parallel needs a positive step")
++        lb = self.semantic.to_tensor(iterator.start)
++        ub = self.semantic.to_tensor(iterator.end)
++        step = self.semantic.to_tensor(iterator.step)
++        if not lb.dtype.is_int() or not ub.dtype.is_int() or not step.dtype.is_int():
++            raise TypeError(f"tl.dev.parallel bounds and step must all be ints, are "
++                            f"({lb.dtype}, {ub.dtype}, {step.dtype})")
++        for name, value in (("lower bound", lb), ("upper bound", ub), ("step", step)):
++            if _is_non_scalar_tensor(value):
++                raise TypeError(f"tl.dev.parallel {name} must be a scalar, got {value.type}")
++        iv_type = self.semantic.integer_promote_impl(lb.dtype, ub.dtype)
++        iv_type = self.semantic.integer_promote_impl(iv_type, step.dtype)
++        iv_ir_type = iv_type.to_ir(self.builder)
++        iv_is_signed = iv_type.int_signedness == language.core.dtype.SIGNEDNESS.SIGNED
++        lb = self.builder.create_int_cast(lb.handle, iv_ir_type, iv_is_signed)
++        ub = self.builder.create_int_cast(ub.handle, iv_ir_type, iv_is_signed)
++        step = self.builder.create_int_cast(step.handle, iv_ir_type, iv_is_signed)
++        iv_placeholder = self.builder.create_poison(iv_ir_type)
++        self.set_value(node.target.id, language.core.tensor(iv_placeholder, iv_type))
++
++        with enter_sub_region(self) as sr:
++            liveins, _ = sr
++            ip, last_loc = self._get_insertion_point_and_loc()
++            names, _, _ = self._find_carries(node, liveins, ignore={node.target.id})
++            if names:
++                raise self._unsupported(
++                    node, "the iterations of a tl.dev.parallel loop are independent: the body "
++                    f"must not assign to {', '.join(names)}, defined before the loop")
++            self._set_insertion_point_and_loc(ip, last_loc)
++            forall_op = self.builder.create_forall_op(lb, ub, step)
++            body = forall_op.get_forall_body()
++            self.scf_stack.append(node)
++            self.builder.set_insertion_point_to_start(body)
++            iv = self.builder.create_index_cast(forall_op.get_induction_var(), iv_ir_type)
++            iv_placeholder.replace_all_uses_with(iv)
++            self.set_value(node.target.id, language.core.tensor(iv, iv_type))
++            self._maybe_set_loc_to_name(iv, node.target.id)
++            self.visit_compound_statement(node.body)
++            self.scf_stack.pop()
++
+     def visit_Slice(self, node):
+         lower = self.visit(node.lower)
+         upper = self.visit(node.upper)
+diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
+index 17dece2346..232cbd792c 100644
+--- a/python/triton/language/dev.py
++++ b/python/triton/language/dev.py
+@@ -9,10 +9,52 @@ implement them accept them.
+ 
+ import builtins
+ 
+-from .core import _unwrap_if_constexpr, builtin
++from .core import _unwrap_if_constexpr, base_value, builtin, constexpr
+ from .core import tuple as _tl_tuple
+ 
+-__all__ = ["alloc", "sched_barrier", "shuffle"]
++__all__ = ["alloc", "parallel", "sched_barrier", "shuffle"]
++
++
++class parallel(base_value):
++    """Loop whose iterations are independent, run by the threads of the program.
++
++    .. highlight:: python
++    .. code-block:: python
++
++        @triton.jit
++        def kernel(...):
++            for i in tl.dev.parallel(0, N, BLOCK):
++                ...
++
++    Used like :code:`tl.range`. The iterations may run in any order and
++    concurrently: the backend distributes them over the threads of the program
++    instance (``num_warps`` on the CPU backend), and the code after the loop
++    starts when all of them are done. Values defined before the loop are
++    shared by the iterations; values defined in the body belong to one
++    iteration. The body must not assign to a variable defined before the loop
++    (there is no value to carry from one iteration to the next), and writes of
++    different iterations to the same memory race. The loop becomes an
++    ``scf.forall`` without shared outputs.
++
++    :param arg1: the start value, or the end value if ``arg2`` is not given.
++    :param arg2: the end value.
++    :param step: the step value, a positive integer.
++    """
++
++    def __init__(self, arg1, arg2=None, step=None):
++        self.step = constexpr(1) if step is None else step
++        if arg2 is None:
++            self.start = constexpr(0)
++            self.end = arg1
++        else:
++            self.start = arg1
++            self.end = arg2
++
++    def __iter__(self):
++        raise RuntimeError("tl.dev.parallel can only be used in @triton.jit'd functions")
++
++    def __next__(self):
++        raise RuntimeError("tl.dev.parallel can only be used in @triton.jit'd functions")
+ 
+ 
+ @builtin

@@ -15,7 +15,7 @@ from triton.runtime.cache import get_cache_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from .paths import _get_llvm_bin_path
-from . import spm
+from . import board, cpu_runtime, spm
 
 
 def _get_sanitizer_type():
@@ -39,44 +39,6 @@ def _sanitizer_available(sanitizer_type):
     return True
 
 
-def _get_openmp_num_threads() -> int:
-    value = os.getenv("TRITON_RISCV_OPENMP_THREADS", "0")
-    if value == "":
-        return 0
-    try:
-        threads = int(value)
-    except ValueError as exc:
-        raise ValueError(
-            "TRITON_RISCV_OPENMP_THREADS must be an integer thread count"
-        ) from exc
-    if threads < 0:
-        raise ValueError("TRITON_RISCV_OPENMP_THREADS must be non-negative")
-    return threads
-
-
-def _openmp_enabled() -> bool:
-    return _get_openmp_num_threads() > 1
-
-
-def _append_openmp_link_args(subprocess_args):
-    if not _openmp_enabled():
-        return subprocess_args
-
-    clang_path = _get_llvm_bin_path("clang++")
-    llvm_root = Path(clang_path).resolve().parent.parent
-    libomp_path = next(llvm_root.rglob("libomp.so"), None)
-    if not libomp_path:
-        raise Exception("libomp.so does not exist.")
-
-    subprocess_args.extend(
-        [
-            f"-L{libomp_path.parent}",
-            "-fopenmp",
-            f"-Wl,-rpath,{libomp_path.parent}",
-        ]
-    )
-    return subprocess_args
-
 
 def _append_vector_math_link_args(subprocess_args):
     # LLVM's LIBMVEC vector-library mapping emits glibc vector ABI symbols such
@@ -86,53 +48,8 @@ def _append_vector_math_link_args(subprocess_args):
     return subprocess_args
 
 
-def _grid_parallel_pragma() -> str:
-    if _openmp_enabled():
-        return (
-            "#pragma omp parallel for collapse(3) num_threads("
-            f"{_get_openmp_num_threads()})"
-        )
-    if _get_sanitizer_type() == "tsan":
-        return "#pragma omp parallel for collapse(3)"
-    return ""
-
 
 # -------------------- Launcher ----------------------------
-_OMP_PARALLEL_FOR_PLACEHOLDER = "__TRITON_SHARED_OMP_PARALLEL_FOR__"
-_OMP_PARALLEL_FOR = "#pragma omp parallel for collapse(3)"
-_LAUNCHER_CACHE_VERSION = b"triton_shared_launcher_v3"
-
-
-def _get_ordinary_openmp_config(sanitizer_type):
-    if platform.system() == "Windows" or sanitizer_type != "":
-        return None, False
-
-    omp_num_threads = os.environ.get("OMP_NUM_THREADS")
-    enabled = omp_num_threads is not None and omp_num_threads != "1"
-    return omp_num_threads, enabled
-
-
-def _finalize_launcher_src(launcher_src, parallel_pragma):
-    return launcher_src.replace(_OMP_PARALLEL_FOR_PLACEHOLDER, parallel_pragma)
-
-
-def _encode_omp_cache_state(omp_num_threads):
-    if omp_num_threads is None:
-        return b"\x00"
-    return b"\x01" + omp_num_threads.encode("utf-8")
-
-
-def _launcher_cache_key(src, kernel_obj, omp_num_threads):
-    cache_input = (
-        src.encode("utf-8")
-        + kernel_obj
-        + _LAUNCHER_CACHE_VERSION
-        + b"\x00OMP_NUM_THREADS\x00"
-        + _encode_omp_cache_state(omp_num_threads)
-    )
-    return hashlib.sha256(cache_input).hexdigest()
-
-
 def _ty_to_cpp(ty):
     if ty[0] == "*":
         return "void*"
@@ -185,44 +102,22 @@ def _format_of(ty):
     }[ty]
 
 
-def _spm_launcher_parts(kernel_name, spm_size, spm_align, spm_header):
-    """The launcher code of a kernel that uses tl.dev.alloc(placement="spm").
 
-    Such a kernel takes the scratchpad region as its trailing argument; the
-    launcher acquires it from the board's driver (spm.py) before any program
-    instance runs and releases it afterwards. Returns the include, the extra
-    kernel parameter declaration, the extra kernel argument, the acquire code
-    and the release code, all empty for a kernel without scratchpad.
+_WARPS_PLACEHOLDER = "__TRITON_CPAR_WARPS__"
+
+
+def _generate_launcher(constants, signature, kernel_name, spm_size=0, spm_align=1):
+    """The C++ source of a kernel's Python launcher.
+
+    The launch grid is executed by the CPU runtime (cpu_runtime.py):
+    tcrt_launch() runs every program instance exactly once on the runtime's
+    worker pool and returns when the whole grid is done. The launcher packs
+    the kernel arguments and provides the per instance entry point. A kernel
+    that uses tl.dev.alloc(placement="spm") takes its slot's scratchpad
+    region as trailing argument. _WARPS_PLACEHOLDER is replaced at launch by
+    the threads per program instance (metadata cpu_threads).
     """
-    if not spm_size:
-        return "", "", "", "void *spm_base = NULL;", ""
-    acquire = f"""
-  spm_lease_t spm_lease;
-  int spm_rc = triton_riscv_spm_acquire({spm_size}, {spm_align}, &spm_lease);
-  if (spm_rc != SPM_OK) {{
-    // spm.raise_acquire_error builds the report and raises SpmOutOfMemoryError.
-    PyObject *spm_mod = PyImport_ImportModule("triton.backends.triton_shared.spm");
-    if (spm_mod) {{
-      PyObject *ret = PyObject_CallMethod(
-          spm_mod, "raise_acquire_error", "isnniiii", spm_rc, "{kernel_name}",
-          (Py_ssize_t){spm_size}, (Py_ssize_t){spm_align}, spm_lease.cpu,
-          spm_lease.domain, spm_lease.busy_block, spm_lease.sys_errno);
-      Py_XDECREF(ret);
-      Py_DECREF(spm_mod);
-    }}
-    if (!PyErr_Occurred())
-      PyErr_SetString(PyExc_RuntimeError, "SPM acquire failed");
-    return NULL;
-  }}
-  void *spm_base = spm_lease.base;"""
-    return (f'#include "spm/{spm_header}"', ", void *", ", spm_base", acquire,
-            "triton_riscv_spm_release(&spm_lease);")
-
-
-def _generate_launcher(constants, signature, kernel_name, spm_size=0, spm_align=1, spm_header=None):
-    spm_include, spm_param, spm_arg, spm_acquire, spm_release = _spm_launcher_parts(
-        kernel_name, spm_size, spm_align, spm_header)
-    arg_decls = ", ".join(f"{_ty_to_cpp(ty)} arg{i}" for i, ty in signature.items())
+    arg_decls = "".join(f", {_ty_to_cpp(ty)} arg{i}" for i, ty in signature.items())
     args_format = "".join(
         [_format_of(_extracted_type(ty)) for ty in signature.values()]
     )
@@ -232,20 +127,17 @@ def _generate_launcher(constants, signature, kernel_name, spm_size=0, spm_align=
         if len(signature) > 0
         else ""
     )
+    runtime_args = [(i, ty) for i, ty in signature.items() if ty != "constexpr"]
 
-    kernel_arg_decls = ", ".join(
-        _ty_to_cpp(ty)
-        for i, ty in signature.items()
-        if ty != "constexpr"
-    )
-    kernel_arg_decls += ", " if kernel_arg_decls else ""
-
-    kernel_parameters = ", ".join(
-        f"static_cast<{_ty_to_cpp(ty)}>(arg{i})" if ty[0] != "*" else f"arg{i}"
-        for i, ty in signature.items()
-        if ty != "constexpr"
-    )
-    kernel_parameters += ", " if kernel_parameters else ""
+    kernel_arg_decls = "".join(f"{_ty_to_cpp(ty)}, " for _, ty in runtime_args)
+    spm_param = ", void *" if spm_size else ""
+    spm_arg = ", spm" if spm_size else ""
+    args_fields = "".join(f"  {_ty_to_cpp(ty)} arg{i};\n" for i, ty in runtime_args)
+    args_init = "".join(
+        (f"  kargs.arg{i} = arg{i};\n" if ty[0] == "*"
+         else f"  kargs.arg{i} = static_cast<{_ty_to_cpp(ty)}>(arg{i});\n")
+        for i, ty in runtime_args)
+    kernel_parameters = "".join(f"a->arg{i}, " for i, _ in runtime_args)
 
     launch_args_str = ", ".join(
         f"ptr_info{i}.dev_ptr" if ty[0] == "*" else f"_arg{i}"
@@ -264,31 +156,46 @@ def _generate_launcher(constants, signature, kernel_name, spm_size=0, spm_align=
     return f"""
 #include <assert.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <Python.h>
 #include "ExecutionEngine/CRunnerUtils.h"
 #include "ExecutionEngine/CRunnerUtils.cpp"
-{spm_include}
+#include "triton_cpu_rt.h"
 
 extern "C" {{
   // Each pointer argument uses the raw data-pointer ABI.
-  void {kernel_name}({kernel_arg_decls}
-                       int, int, int, int, int, int{spm_param});
+  void {kernel_name}({kernel_arg_decls}int, int, int, int, int, int{spm_param});
 }}
 
-static void _launch(void *spm_base, int gridX, int gridY, int gridZ, {arg_decls}) {{
-  if (gridX*gridY*gridZ > 0) {{
-    // Cast "function" to the real function type.
-    // Parallelize independent Triton grid programs when OpenMP is enabled.
-    {_OMP_PARALLEL_FOR_PLACEHOLDER}
-    for(int x = 0; x < gridX; x++) {{
-      for(int y = 0; y < gridY; y++) {{
-        for(int z = 0; z < gridZ; z++) {{
-          {kernel_name}({kernel_parameters}
-                        gridX, gridY, gridZ, x, y, z{spm_arg});
-        }}
-      }}
-    }}
-  }}
+struct _KernelArgs {{
+  int gridX, gridY, gridZ;
+{args_fields}}};
+
+static void _instance(void *raw, void *spm, int x, int y, int z) {{
+  (void)spm;
+  const _KernelArgs *a = static_cast<const _KernelArgs *>(raw);
+  {kernel_name}({kernel_parameters}a->gridX, a->gridY, a->gridZ, x, y, z{spm_arg});
+}}
+
+static int _launch(int gridX, int gridY, int gridZ{arg_decls}) {{
+  _KernelArgs kargs;
+  kargs.gridX = gridX;
+  kargs.gridY = gridY;
+  kargs.gridZ = gridZ;
+{args_init}
+  tcrt_launch_desc desc;
+  desc.abi_version = TCRT_ABI_VERSION;
+  desc.grid[0] = gridX;
+  desc.grid[1] = gridY;
+  desc.grid[2] = gridZ;
+  desc.warps = {_WARPS_PLACEHOLDER};
+  desc.spm_bytes = {spm_size};
+  desc.spm_align = {spm_align};
+  desc.fn = _instance;
+  desc.args = &kargs;
+  // CSV timeline of the launch, see docs/09-Program-Instance-Parallelism.md.
+  desc.trace_path = getenv("TRITON_CPAR_TRACE_FILE");
+  return tcrt_launch(&desc);
 }}
 
 typedef struct _DevicePtrInfo {{
@@ -369,10 +276,25 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
   // raise exception asap
   {get_ptr_checks_str};
-  {spm_acquire}
-  _launch(spm_base, gridX, gridY, gridZ, {launch_args_str});
-  {spm_release}
-
+  int rc = _launch(gridX, gridY, gridZ, {launch_args_str});
+  if (rc == TCRT_ERROR_SPM) {{
+    // driver._raise_spm_error builds the report and raises SpmOutOfMemoryError.
+    PyObject *mod = PyImport_ImportModule("triton.backends.triton_shared.driver");
+    if (mod) {{
+      PyObject *ret = PyObject_CallMethod(mod, "_raise_spm_error", "snn",
+                                          "{kernel_name}", (Py_ssize_t){spm_size},
+                                          (Py_ssize_t){spm_align});
+      Py_XDECREF(ret);
+      Py_DECREF(mod);
+    }}
+    if (!PyErr_Occurred())
+      PyErr_SetString(PyExc_RuntimeError, "SPM unavailable");
+    return NULL;
+  }}
+  if (rc != TCRT_OK) {{
+    PyErr_Format(PyExc_RuntimeError, "tcrt_launch failed with %d", rc);
+    return NULL;
+  }}
   if (PyErr_Occurred()) {{
     return NULL;
   }}
@@ -413,26 +335,42 @@ PyMODINIT_FUNC PyInit___triton_shared_ref_cpu_kernel_launcher(void) {{
 """
 
 
-def compile_module(launcher_src, kernel_placeholder_name, extra_link_args=()):
+
+
+def _raise_spm_error(kernel_name, bytes_, align):
+    """Called by a launcher whose launch the runtime refused for lack of SPM."""
+    spm.raise_launch_error(cpu_runtime.spm_status(), kernel_name, bytes_, align,
+                           cpu_runtime.active().config)
+
+
+def _launcher_cache_key(src, kernel_obj, runtime_path):
+    cache_input = (
+        src.encode("utf-8")
+        + kernel_obj
+        + _LAUNCHER_CACHE_VERSION
+        + os.path.basename(runtime_path).encode("utf-8")
+    )
+    return hashlib.sha256(cache_input).hexdigest()
+
+
+_LAUNCHER_CACHE_VERSION = b"triton_shared_launcher_v4"
+
+
+def compile_module(launcher_src, kernel_placeholder_name):
+    if platform.system() != "Linux":
+        raise RuntimeError("the triton-riscv CPU runtime requires Linux")
     py_version = sys.version_info
-    if platform.system() == "Windows":
-        py_include_dir = os.path.join(sys.base_prefix, "include")
-        py_lib_dir = os.path.join(sys.base_prefix, "libs")
-        py_lib = "{name}{major}{minor}.lib".format(
-            name="python", major=py_version.major, minor=py_version.minor
-        )
-    else:
-        py_include_dir = os.path.join(
-            sys.base_prefix,
-            "include",
-            f"python{sys.version_info.major}.{sys.version_info.minor}",
-        )
-        py_lib_dir = os.path.join(sys.base_prefix, "lib")
-        py_lib = "{name}{major}.{minor}".format(
-            name="python", major=py_version.major, minor=py_version.minor
-        )
-    cpu_backend_path = Path(__file__).resolve().parent
-    include_dir = os.path.join(cpu_backend_path, "include")
+    py_include_dir = os.path.join(
+        sys.base_prefix,
+        "include",
+        f"python{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    py_lib_dir = os.path.join(sys.base_prefix, "lib")
+    py_lib = "{name}{major}.{minor}".format(
+        name="python", major=py_version.major, minor=py_version.minor
+    )
+    include_dir = str(cpu_runtime.INCLUDE_DIR)
+    runtime_dir = str(cpu_runtime.RUNTIME_DIR)
     # Loading an extension module from disk costs O(100 us) even when its
     # compiled shared object is already in Triton's cache. Keep the imported
     # module and bound launch function alive for repeated kernel invocations.
@@ -456,19 +394,13 @@ def compile_module(launcher_src, kernel_placeholder_name, extra_link_args=()):
         # The cu_function parameter actually contains our kernel obj.
         # See CPUUtils.load_binary method.
         kernel_obj = cu_function
-        kernel_name = kernel_metadata[6]  # see pack_metadata in compiler.py
+        # See pack_metadata in compiler.py.
+        kernel_name = kernel_metadata[6]
+        cpu_threads = kernel_metadata[7]
+        config = board.CONFIGS[kernel_metadata[8]]
         sanitizer_type = _get_sanitizer_type()
-        omp_num_threads, ordinary_openmp_enabled = _get_ordinary_openmp_config(
-            sanitizer_type
-        )
-        custom_openmp_enabled = _openmp_enabled()
-        kernel_key = (
-            kernel_name,
-            kernel_obj,
-            sanitizer_type,
-            omp_num_threads,
-            _get_openmp_num_threads(),
-        )
+        runtime_path = cpu_runtime.configure(config, sanitizer_type)
+        kernel_key = (kernel_name, kernel_obj, sanitizer_type, cpu_threads)
         launch_fn = loaded_kernels.get(kernel_key)
         if launch_fn is not None:
             return launch_fn(
@@ -481,16 +413,10 @@ def compile_module(launcher_src, kernel_placeholder_name, extra_link_args=()):
                 launch_exit_hook,
                 *args,
             )
-        if custom_openmp_enabled:
-            parallel_pragma = _grid_parallel_pragma()
-        elif sanitizer_type == "tsan" or ordinary_openmp_enabled:
-            parallel_pragma = _OMP_PARALLEL_FOR
-        else:
-            parallel_pragma = ""
-        src = _finalize_launcher_src(launcher_src, parallel_pragma)
-        src = src.replace(kernel_placeholder_name, kernel_name)
+        src = launcher_src.replace(kernel_placeholder_name, kernel_name)
+        src = src.replace(_WARPS_PLACEHOLDER, str(max(int(cpu_threads), 1)))
 
-        key = _launcher_cache_key(src, kernel_obj, omp_num_threads)
+        key = _launcher_cache_key(src, kernel_obj, runtime_path)
         cache = get_cache_manager(key)
         name = f"__triton_shared_ref_cpu_kernel_launcher_{key[:16]}"
         src = src.replace("__triton_shared_ref_cpu_kernel_launcher", name)
@@ -508,136 +434,74 @@ def compile_module(launcher_src, kernel_placeholder_name, extra_link_args=()):
                 *args,
             )
 
-        if platform.system() == "Windows":
-            filename = f"{name}.pyd"
-        else:
-            filename = f"{name}.so"
+        filename = f"{name}.so"
         cache_path = cache.get_file(filename)
 
         if cache_path is None:
             with tempfile.TemporaryDirectory() as tmpdir:
-                if platform.system() == "Windows":
-                    if sanitizer_type != "":
+                obj_path = os.path.join(tmpdir, "kernel.o")
+                launcher_src_path = os.path.join(tmpdir, "main.cxx")
+                so_path = os.path.join(tmpdir, "kernel.so")
+                Path(obj_path).write_bytes(kernel_obj)
+                Path(launcher_src_path).write_text(src)
+                # The runtime library is linked by path and found again by its
+                # unique soname; the process already loaded it (cpu_runtime).
+                runtime_link_args = [
+                    runtime_path,
+                    f"-Wl,-rpath,{os.path.dirname(runtime_path)}",
+                ]
+
+                # Compile it together.
+                if sanitizer_type != "":
+                    if not _sanitizer_available(sanitizer_type):
                         raise Exception(
-                            "Sanitizers are not supported on Windows with triton-shared."
+                            'Use LD_PRELOAD="path/to/libclang_rt.'
+                            + sanitizer_type
+                            + '.so" TRITON_SHARED_SANITIZER_TYPE='
+                            + sanitizer_type
+                            + " python ..."
                         )
-
-                    obj_path = os.path.join(tmpdir, "kernel.obj")
-                    launcher_src_path = os.path.join(tmpdir, "main.cxx")
-                    so_path = os.path.join(tmpdir, "kernel.pyd")
-                    Path(obj_path).write_bytes(kernel_obj)
-                    Path(launcher_src_path).write_text(src)
-                    # Compile it together.
-                    subprocess.check_call(
-                        [
-                            "cl",
-                            "/LD",
-                            "/std:c++17",
-                            launcher_src_path,
-                            obj_path,
-                            f"-I{py_include_dir}",
-                            f"-I{include_dir}",
-                            "/link",
-                            f"/LIBPATH:{py_lib_dir}",
-                            "/link",
-                            f"{py_lib}",
-                            f"/OUT:{so_path}",
-                        ]
-                    )
+                    subprocess_args = [
+                        _get_llvm_bin_path("clang++"),
+                        "-std=c++17",
+                        launcher_src_path,
+                        obj_path,
+                        f"-I{py_include_dir}",
+                        f"-I{include_dir}",
+                        f"-I{runtime_dir}",
+                        f"-L{py_lib_dir}",
+                        f"-Wl,-rpath,{py_lib_dir}",
+                        "-shared",
+                        f"-l{py_lib}",
+                        "-fPIC",
+                        "-o",
+                        so_path,
+                        "-Wl,-Bsymbolic",
+                    ]
+                    if sanitizer_type == "asan":
+                        subprocess_args.extend(
+                            ["-g", "-fsanitize=address", "-mllvm", "-asan-stack=0"]
+                        )
+                    elif sanitizer_type == "tsan":
+                        subprocess_args.extend(["-g", "-fsanitize=thread"])
                 else:
-                    obj_path = os.path.join(tmpdir, "kernel.o")
-                    launcher_src_path = os.path.join(tmpdir, "main.cxx")
-                    so_path = os.path.join(tmpdir, "kernel.so")
-                    Path(obj_path).write_bytes(kernel_obj)
-                    Path(launcher_src_path).write_text(src)
-
-                    # Compile it together.
-                    if sanitizer_type != "":
-                        clang_path = _get_llvm_bin_path("clang++")
-                        llvm_root = Path(clang_path).resolve().parent.parent
-
-                        subprocess_args = [
-                            clang_path,
-                            "-std=c++17",
-                            launcher_src_path,
-                            obj_path,
-                            f"-I{py_include_dir}",
-                            f"-I{include_dir}",
-                            f"-L{py_lib_dir}",
-                            f"-Wl,-rpath,{py_lib_dir}",
-                            "-shared",
-                            f"-l{py_lib}",
-                            "-fPIC",
-                            "-o",
-                            so_path,
-                        ]
-                        if platform.system() == "Linux":
-                            subprocess_args.append("-Wl,-Bsymbolic")
-
-                        if not _sanitizer_available(sanitizer_type):
-                            raise Exception(
-                                'Use LD_PRELOAD="path/to/libclang_rt.'
-                                + sanitizer_type
-                                + '.so" TRITON_SHARED_SANITIZER_TYPE='
-                                + sanitizer_type
-                                + " python ..."
-                            )
-
-                        if sanitizer_type == "asan":
-                            subprocess_args.extend(
-                                ["-g", "-fsanitize=address", "-mllvm", "-asan-stack=0"]
-                            )
-                        elif sanitizer_type == "tsan":
-                            # ensure that openmp is available
-                            libomp_path = next(
-                                llvm_root.rglob("libomp.so"),
-                                None,
-                            )
-
-                            if not libomp_path:
-                                raise Exception("libomp.so does not exist.")
-
-                            libomp_path = str(libomp_path.parent)
-
-                            subprocess_args.extend(
-                                [
-                                    "-g",
-                                    "-fsanitize=thread",
-                                    "-fopenmp",
-                                    f"-Wl,-rpath,{libomp_path}",
-                                ]
-                            )
-
-                        if sanitizer_type != "tsan" and _openmp_enabled():
-                            subprocess_args = _append_openmp_link_args(subprocess_args)
-
-                        subprocess_args = _append_vector_math_link_args(subprocess_args)
-                        subprocess_args += list(extra_link_args)
-
-                        subprocess.check_call(subprocess_args)
-                    else:
-                        compiler = "g++"
-                        subprocess_args = [
-                            compiler,
-                            "-std=c++17",
-                            launcher_src_path,
-                            obj_path,
-                            f"-I{py_include_dir}",
-                            f"-I{include_dir}",
-                            "-shared",
-                            "-fPIC",
-                            "-o",
-                            so_path,
-                        ]
-                        if ordinary_openmp_enabled:
-                            subprocess_args.append("-fopenmp")
-                        if platform.system() == "Linux":
-                            subprocess_args.append("-Wl,-Bsymbolic")
-                        if custom_openmp_enabled and not ordinary_openmp_enabled:
-                            subprocess_args.append("-fopenmp")
-                        subprocess_args = _append_vector_math_link_args(subprocess_args)
-                        subprocess_args += list(extra_link_args)
-                        subprocess.check_call(subprocess_args)
+                    subprocess_args = [
+                        "g++",
+                        "-std=c++17",
+                        launcher_src_path,
+                        obj_path,
+                        f"-I{py_include_dir}",
+                        f"-I{include_dir}",
+                        f"-I{runtime_dir}",
+                        "-shared",
+                        "-fPIC",
+                        "-o",
+                        so_path,
+                        "-Wl,-Bsymbolic",
+                    ]
+                subprocess_args += runtime_link_args
+                subprocess_args = _append_vector_math_link_args(subprocess_args)
+                subprocess.check_call(subprocess_args)
 
                 with open(so_path, "rb") as f:
                     cache_path = cache.put(f.read(), filename, binary=True)
@@ -684,28 +548,23 @@ class CPULauncher(object):
         # launcher, so it is part of the key.
         spm_size = int(getattr(metadata, "spm_size", 0))
         spm_align = int(getattr(metadata, "spm_align", 1))
-        spm_driver = spm.runtime_driver() if spm_size else None
         launcher_key = (
             tuple(sorted(constants.items())),
             tuple(signature.items()),
             spm_size,
             spm_align,
-            _get_openmp_num_threads(),
             _get_sanitizer_type(),
         )
         self.launch = _launcher_signature_cache.get(launcher_key)
         if self.launch is not None:
             return
         launcher_src = _generate_launcher(
-            constants, signature, kernel_placeholder_name, spm_size, spm_align,
-            spm_driver.header if spm_driver else None)
+            constants, signature, kernel_placeholder_name, spm_size, spm_align)
         # Later KERNEL_NAME_PLACEHOLDER will be used to assign the kernel name
         # in the following launch function.
         self.launch = _compiled_launcher_cache.get(launcher_src)
         if self.launch is None:
-            self.launch = compile_module(
-                launcher_src, kernel_placeholder_name,
-                spm_driver.link_args if spm_driver else ())
+            self.launch = compile_module(launcher_src, kernel_placeholder_name)
             _compiled_launcher_cache[launcher_src] = self.launch
         _launcher_signature_cache[launcher_key] = self.launch
 

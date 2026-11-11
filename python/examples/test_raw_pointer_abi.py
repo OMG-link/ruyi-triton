@@ -65,7 +65,7 @@ def _store_num_programs(destination):
 
 def test_num_programs_with_singleton_stores():
     storage = torch.full((7,), -1, dtype=torch.int32)
-    _store_num_programs[(2, 3, 4)](storage[2:], openmp_num_threads=0)
+    _store_num_programs[(2, 3, 4)](storage[2:])
     expected = torch.tensor([-1, -1, 2, 3, 4, -1, -1], dtype=torch.int32)
     torch.testing.assert_close(storage, expected)
 

@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import warnings
 
 import pytest
 import torch
@@ -110,14 +111,24 @@ def _launch_spm(device):
     return x, out
 
 
+def _board_config():
+    from triton.backends.triton_shared import board, compiler
+
+    backend = compiler.CPUBackend(triton.runtime.driver.active.get_current_target())
+    return board.CONFIGS[backend.parse_options({}).board_config]
+
+
 def test_alloc_placement_spm(device):
-    # On a board with a scratchpad the round trip works; on any other machine
-    # the kernel compiles with a warning and fails at launch.
+    # On a board configuration with a scratchpad the round trip works; on any
+    # other one the kernel compiles with a warning and fails at launch.
     from triton.backends.triton_shared import spm
 
-    if isinstance(spm.runtime_driver(), spm.NoSpmDriver):
-        with pytest.warns(UserWarning, match="no SPM driver"):
-            with pytest.raises(spm.SpmOutOfMemoryError, match="no SPM driver"):
+    if not _board_config().spm_bytes_per_cpu:
+        # The compile-time warning only appears when the kernel is compiled,
+        # not when it comes from the cache.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with pytest.raises(spm.SpmOutOfMemoryError, match="has no scratchpad"):
                 _launch_spm(device)
     else:
         x, out = _launch_spm(device)
@@ -132,16 +143,20 @@ def test_alloc_placement_invalid(device):
 
 
 # --------------------------------------------------------------------------
-# Scratchpad drivers. These run only on a board with an SPM driver.
+# Scratchpad. These run only with a board configuration that has one. The
+# runtime holds the whole scratchpad from the first launch of the process on;
+# a program instance of a kernel without parallel region runs on one CPU and
+# gets that CPU's share.
 # --------------------------------------------------------------------------
 
-def _spm_driver():
+
+def _spm_config():
     from triton.backends.triton_shared import spm
 
-    driver = spm.runtime_driver()
-    if isinstance(driver, spm.NoSpmDriver):
-        pytest.skip("no SPM driver on this board")
-    return spm, driver
+    config = _board_config()
+    if not config.spm_bytes_per_cpu:
+        pytest.skip("no scratchpad in this board configuration")
+    return spm, config
 
 
 @triton.jit
@@ -153,80 +168,78 @@ def _spm_big_kernel(out_ptr, N: tl.constexpr):
 
 
 def test_spm_capacity(device):
-    spm, driver = _spm_driver()
+    spm, config = _spm_config()
     out = torch.empty(64, dtype=torch.int8)
-    with pytest.raises(spm.SpmOutOfMemoryError, match="can use at most"):
-        _spm_big_kernel[(1,)](out, N=driver.budget_per_program + 4096)
+    with pytest.raises(spm.SpmOutOfMemoryError, match="gets only"):
+        _spm_big_kernel[(1,)](out, N=config.spm_bytes_per_cpu + 4096)
 
 
-def test_spm_full_budget(device):
-    # The whole budget of a program instance, two K3 blocks.
-    _, driver = _spm_driver()
+def test_spm_full_share(device):
+    # The whole share of the CPU running the program instance.
+    _, config = _spm_config()
     out = torch.empty(64, dtype=torch.int8)
-    _spm_big_kernel[(1,)](out, N=driver.budget_per_program)
+    _spm_big_kernel[(1,)](out, N=config.spm_bytes_per_cpu)
     torch.testing.assert_close(out, torch.arange(64, dtype=torch.int8))
 
 
-def test_spm_restores_affinity(device):
-    _spm_driver()
+def test_spm_keeps_caller_affinity(device):
+    _spm_config()
     before = os.sched_getaffinity(0)
     _launch_spm(device)
     assert os.sched_getaffinity(0) == before
 
 
-_HOLD_K1 = """
-import mmap, os, sys, time
-fd = os.open("/dev/tcm", os.O_RDWR | os.O_SYNC)
-m = mmap.mmap(fd, 512 << 10)
-print("held", flush=True)
-time.sleep(30)
+_CHILD = """
+import torch, triton, triton.language as tl
+from triton.backends.triton_shared import spm
+from triton.backends.triton_shared.driver import CPUDriver
+triton.runtime.driver.set_active(CPUDriver())
+
+@triton.jit
+def kernel(x_ptr, out_ptr):
+    buf = tl.dev.alloc(64, tl.float32, placement="spm")
+    offs = tl.arange(0, 64)
+    tl.store(buf + offs, tl.load(x_ptr + offs))
+    tl.store(out_ptr + offs, tl.load(buf + offs))
+
+x = torch.randn(64)
+out = torch.empty_like(x)
+try:
+    kernel[(1,)](x, out)
+    print("launched")
+except spm.SpmOutOfMemoryError as e:
+    print("refused:", e)
 """
 
-_HOLD_K3 = """
-import ctypes, os, sys, time
-cpu = int(sys.argv[1])
-os.sched_setaffinity(0, {cpu})
-lib = ctypes.CDLL("libspine_tcm.so")
-lib.spine_tcm_runtime_mem_try_wait.restype = ctypes.c_void_p
-block = 2 * ((cpu - 8) // 2)
-assert lib.spine_tcm_runtime_mem_try_wait(block, 0)
-print("held", flush=True)
-time.sleep(30)
-lib.spine_tcm_runtime_mem_release(block)
-"""
+
+def _run_child(tmp_path, env=None):
+    script = tmp_path / "child.py"
+    script.write_text(_CHILD)
+    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
+                            env={**os.environ, **(env or {})}, timeout=600)
+    assert result.returncode == 0, result.stderr
+    return result.stdout
 
 
-def test_spm_occupied(device):
-    # Another live process holds this core's scratchpad: the launch fails and
-    # says so, without taking the scratchpad away from it.
-    spm, driver = _spm_driver()
-    cpu = sorted(os.sched_getaffinity(0))[0]
-    if isinstance(driver, spm.SpacemitK3TcmDriver):
-        script, args, expected = _HOLD_K3, [str(cpu)], "held by live threads"
-    else:
-        script, args, expected = _HOLD_K1, [], "mapped by another process"
-    holder = subprocess.Popen([sys.executable, "-c", script, *args], stdout=subprocess.PIPE, text=True)
-    try:
-        assert holder.stdout.readline().strip() == "held"
-        os.sched_setaffinity(0, {cpu})
-        with pytest.raises(spm.SpmOutOfMemoryError, match=expected):
-            _launch_spm(device)
-    finally:
-        holder.kill()
-        holder.wait()
-        if isinstance(driver, spm.SpacemitK3TcmDriver):
-            spm.release_stale_k3()
+def test_spm_occupied(device, tmp_path):
+    # This process holds the scratchpad (from its first launch on); another
+    # process is refused and told who holds it, without taking it away.
+    spm, config = _spm_config()
+    _launch_spm(device)
+    expected = ("held by another process"
+                if config.spm_driver is spm.SpacemitK3TcmDriver
+                else "mapped by another process")
+    out = _run_child(tmp_path)
+    assert "refused:" in out and expected in out, out
+    x, out_tensor = _launch_spm(device)
+    torch.testing.assert_close(out_tensor, x + 1.0)
 
 
-def test_spm_k1_x60_core(device):
-    # An X60 core has no TCM; the launch is refused instead of crashing.
-    spm, driver = _spm_driver()
-    if not isinstance(driver, spm.SpacemitK1TcmDriver):
+def test_spm_cpu_without_share(device, tmp_path):
+    # On the K1, the X60 core 4 has no TCM: the launch is refused instead of
+    # crashing.
+    spm, config = _spm_config()
+    if config.spm_driver is not spm.SpacemitK1TcmDriver:
         pytest.skip("K1 only")
-    before = os.sched_getaffinity(0)
-    os.sched_setaffinity(0, {4})
-    try:
-        with pytest.raises(spm.SpmOutOfMemoryError, match="CPU 4 has no scratchpad"):
-            _launch_spm(device)
-    finally:
-        os.sched_setaffinity(0, before)
+    out = _run_child(tmp_path, {"TRITON_CPAR_CPUS": "4"})
+    assert "without a scratchpad share" in out, out

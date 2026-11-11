@@ -2,13 +2,16 @@
 
 The compiler needs nothing from the hardware: a kernel that uses ``spm`` gets
 one hidden trailing argument, the base of a region of ``spm_size`` bytes, and
-records ``spm_size`` and ``spm_align`` in its metadata. A driver provides that
-region when the kernel is launched, from the scratchpad local to the core the
-launch runs on, and reports every reason it cannot as an
-``SpmOutOfMemoryError``.
+records ``spm_size`` and ``spm_align`` in its metadata.
 
-Each driver has a C header under ``include/spm/`` that the launcher includes,
-and the link flags it needs. The launcher is built for the board it runs on.
+The CPU runtime acquires the board's whole scratchpad once, when it is
+configured, and holds it until the process exits. Every slot (the CPUs that
+run one program instance) gets the share of its CPUs (board.py), and every
+program instance gets the share of its slot. Every reason a launch cannot get
+its region is reported as an ``SpmOutOfMemoryError``.
+
+Each driver has a C header under ``include/spm/`` the runtime is built with,
+and the link flags it needs. The runtime is built for the board it runs on.
 
 Run ``python -m triton.backends.triton_shared.spm_tool status`` to see who
 holds the scratchpad, and ``... release-stale`` to clear records left by
@@ -23,7 +26,7 @@ import warnings
 
 KiB = 1 << 10
 
-# Return codes of triton_riscv_spm_acquire, include/spm/spm_common.h.
+# SPM_* codes of include/spm/spm_common.h.
 _OK, _NO_DRIVER, _CPU, _CAPACITY, _ALIGN, _OCCUPIED, _DEVICE = range(7)
 
 
@@ -32,18 +35,11 @@ class SpmOutOfMemoryError(RuntimeError):
 
 
 class SpmDriver:
-    """How one board provides the scratchpad region of a launch."""
+    """How one board provides its scratchpad to the runtime."""
 
     name = "none"
-    board = None                 # Device Tree `compatible` prefix
     header = "spm_none.h"
     link_args = ()
-    budget_per_program = 0       # bytes, for the compile-time warning
-    cpus = ""                    # cores that have a scratchpad
-
-    @classmethod
-    def detect(cls):
-        return False
 
     def describe_holders(self):
         """Who holds the scratchpad, for error reports. Empty if unknown."""
@@ -56,27 +52,13 @@ class NoSpmDriver(SpmDriver):
 
 class SpacemitK1TcmDriver(SpmDriver):
     name = "spacemit-k1-tcm"
-    board = "spacemit,k1"
     header = "spm_spacemit_k1.h"
-    budget_per_program = 512 * KiB
-    cpus = "0-3"
-
-    @classmethod
-    def detect(cls):
-        return _compatible().startswith(cls.board)
 
 
 class SpacemitK3TcmDriver(SpmDriver):
     name = "spacemit-k3-tcm"
-    board = "spacemit,k3"
     header = "spm_spacemit_k3.h"
     link_args = ("-lspine_tcm",)
-    budget_per_program = 768 * KiB
-    cpus = "8-15"
-
-    @classmethod
-    def detect(cls):
-        return _compatible().startswith(cls.board)
 
     def describe_holders(self):
         try:
@@ -84,13 +66,6 @@ class SpacemitK3TcmDriver(SpmDriver):
         except OSError as e:
             return f"TCM blocks: cannot query spine_tcm ({e})."
         return _format_k3_blocks(blocks)
-
-
-_DRIVERS = (SpacemitK1TcmDriver, SpacemitK3TcmDriver)
-
-# LLVM processor names that identify a board, for the compile-time warning.
-# LLVM names both K1 core types spacemit-x60.
-_TARGET_BOARDS = {"spacemit-x60": SpacemitK1TcmDriver, "spacemit-a100": SpacemitK3TcmDriver}
 
 
 @functools.lru_cache()
@@ -102,42 +77,23 @@ def _compatible():
         return ""
 
 
-@functools.lru_cache()
-def runtime_driver():
-    """The driver of the board this process runs on."""
-    for cls in _DRIVERS:
-        if cls.detect():
-            return cls()
-    return NoSpmDriver()
-
-
-def driver_for_target(target_cpu):
-    """The driver a compile target implies, or None. Only used for warnings."""
-    board = os.getenv("TRITON_RISCV_BOARD")
-    if board:
-        for cls in _DRIVERS:
-            if cls.name == board or (cls.board and board.startswith(cls.board)):
-                return cls()
-        return None
-    cls = _TARGET_BOARDS.get(target_cpu)
-    return cls() if cls else None
-
-
-def warn_if_unlikely_to_run(kernel_name, spm_size, target_cpu):
+def warn_if_unlikely_to_run(kernel_name, spm_size, config, warps):
     """Compile-time warning for a kernel whose scratchpad will not fit."""
     if not spm_size:
         return
-    driver = driver_for_target(target_cpu)
-    if driver is None:
+    if not config.spm_bytes_per_cpu:
         warnings.warn(
-            f"kernel '{kernel_name}' uses placement=\"spm\", which no SPM driver "
-            f"provides on target '{target_cpu}'; it will fail at launch",
+            f"kernel '{kernel_name}' uses placement=\"spm\", which the board "
+            f"configuration '{config.name}' does not provide; it will fail at launch",
             stacklevel=2)
-    elif spm_size > driver.budget_per_program:
+        return
+    ncpus = sum(len(d) for d in config.domains or ())
+    budget = config.spm_bytes_per_cpu * max(1, min(warps, ncpus or warps))
+    if spm_size > budget:
         warnings.warn(
             f"kernel '{kernel_name}' needs {_kib(spm_size)} of SPM, more than the "
-            f"{_kib(driver.budget_per_program)} available per program instance on "
-            f"{driver.name}; it will fail at launch",
+            f"{_kib(budget)} a program instance of {warps} thread(s) gets on "
+            f"'{config.name}'; it will fail at launch",
             stacklevel=2)
 
 
@@ -145,32 +101,36 @@ def _kib(n):
     return f"{n} bytes" if n < KiB else f"{n / KiB:g} KiB"
 
 
-def raise_acquire_error(code, kernel_name, bytes_, align, cpu, domain, busy_block, sys_errno):
-    """Called by the launcher when triton_riscv_spm_acquire fails."""
-    driver = runtime_driver()
+def raise_launch_error(status, kernel_name, bytes_, align, config):
+    """Raises the SpmOutOfMemoryError of a launch the runtime refused.
+
+    `status` is the runtime's tcrt_spm_status_t of the failure.
+    """
+    driver = config.spm_driver()
+    code = status.code
     head = f"kernel '{kernel_name}' needs {_kib(bytes_)} of SPM"
     if code == _NO_DRIVER:
-        reason = f"{head}, but this board has no SPM driver ({_compatible() or sys.platform})."
+        reason = (f"{head}, but the board configuration '{config.name}' has no "
+                  f"scratchpad ({_compatible() or sys.platform}).")
     elif code == _CPU:
-        reason = (f"{head}, but CPU {cpu} has no scratchpad on {driver.name} "
-                  f"(scratchpad cores: {driver.cpus}).")
+        reason = (f"{head}, but the program instance on CPU {status.slot_cpu} runs on "
+                  f"CPUs without a scratchpad share on '{config.name}'.")
     elif code == _CAPACITY:
-        reason = (f"{head}, but a program instance on {driver.name} can use at most "
-                  f"{_kib(driver.budget_per_program)}.")
+        reason = (f"{head}, but a program instance on CPU {status.slot_cpu} gets only "
+                  f"{_kib(status.slot_bytes)} on '{config.name}' (its CPUs' shares).")
     elif code == _ALIGN:
         reason = f"{head} aligned to {align} bytes, more than {driver.name} can align."
     elif code == _OCCUPIED:
-        where = f"CPU {cpu}, domain {domain}"
-        if busy_block >= 0:
-            reason = f"{head} on {driver.name} ({where}), but block {busy_block} is occupied."
-        else:
-            reason = (f"{head} on {driver.name} ({where}), but the TCM is mapped by "
+        if status.busy_block >= 0:
+            reason = (f"{head}, but {driver.name} block {status.busy_block} is held by "
                       f"another process.")
+        else:
+            reason = f"{head}, but the TCM is mapped by another process."
     elif code == _DEVICE:
         reason = (f"{head}, but the {driver.name} scratchpad cannot be opened or mapped: "
-                  f"{os.strerror(sys_errno) if sys_errno else 'unavailable'}.")
+                  f"{os.strerror(status.sys_errno) if status.sys_errno else 'unavailable'}.")
     else:
-        reason = f"{head}, but the driver returned an unknown error {code}."
+        reason = f"{head}, but the runtime returned an unknown error {code}."
     holders = driver.describe_holders() if code in (_OCCUPIED, _DEVICE) else ""
     raise SpmOutOfMemoryError(reason + ("\n\n" + holders if holders else ""))
 
@@ -247,10 +207,7 @@ def _format_k3_blocks(blocks):
     if live:
         ids = ", ".join(str(b["id"]) for b in live)
         lines += ["", f"Block(s) {ids} are held by live threads. Do not clear them; wait for "
-                  "those processes to finish, or run on a core whose pair of blocks is free."]
-        free = [d for d in range(4) if not any(b["acquired"] for b in blocks[2 * d:2 * d + 2])]
-        if free:
-            lines.append("Free pairs: " + ", ".join(f"CPU {8 + 2 * d},{9 + 2 * d}" for d in free) + ".")
+                  "those processes to finish."]
     return "\n".join(lines)
 
 
@@ -271,13 +228,14 @@ def main(argv=None):
                                      description="Inspect the board's scratchpad memory.")
     parser.add_argument("command", choices=["status", "release-stale"])
     args = parser.parse_args(argv)
-    driver = runtime_driver()
-    if isinstance(driver, SpacemitK3TcmDriver):
+    board = _compatible()
+    if board.startswith("spacemit,k3"):
+        driver = SpacemitK3TcmDriver()
         if args.command == "release-stale":
             released = release_stale_k3()
             print("released blocks: " + (", ".join(map(str, released)) or "none"))
         print(driver.describe_holders())
-    elif isinstance(driver, SpacemitK1TcmDriver):
+    elif board.startswith("spacemit,k1"):
         print("spacemit-k1-tcm: the kernel driver allows one mapping at a time and frees it "
               "when its process exits; it does not report the owner, and there are no "
               "records to clear.")
