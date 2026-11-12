@@ -1,0 +1,213 @@
+diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
+index 1b4f1c1b4c..143eba24d1 100644
+--- a/include/triton/Dialect/Triton/IR/TritonOps.td
++++ b/include/triton/Dialect/Triton/IR/TritonOps.td
+@@ -200,7 +200,7 @@ def TT_AddPtrOp : TT_Op<"addptr",
+                          SameOperandsAndResultEncoding,
+                          TypesMatchWith<"result type matches ptr type",
+                                         "result", "ptr", "$_self">]> {
+-    let arguments = (ins TT_PtrLike:$ptr, TT_IntLike:$offset);
++    let arguments = (ins TT_PtrLike:$ptr, TT_IntOrIndexLike:$offset);
+ 
+     let results = (outs TT_PtrLike:$result);
+ 
+diff --git a/include/triton/Dialect/Triton/IR/TritonTypes.td b/include/triton/Dialect/Triton/IR/TritonTypes.td
+index 45249aa86f..85d658c45c 100644
+--- a/include/triton/Dialect/Triton/IR/TritonTypes.td
++++ b/include/triton/Dialect/Triton/IR/TritonTypes.td
+@@ -31,6 +31,14 @@ def TT_Int : AnyTypeOf<[I1, I4, I8, I16, I32, I64], "integer">;
+ def TT_IntTensor : RankedTensorOf<[TT_Int]>;
+ def TT_IntLike : AnyTypeOf<[TT_Int, TT_IntTensor]>;
+ 
++// Index Type
++// Index width is determined by the target data layout.
++def TT_IndexTensor : RankedTensorOf<[Index]>;
++def TT_IndexLike : AnyTypeOf<[Index, TT_IndexTensor]>;
++
++// Pointer displacements admit explicit integers or target-sized indices.
++def TT_IntOrIndexLike : AnyTypeOf<[TT_IntLike, TT_IndexLike]>;
++
+ // I32 Type
+ // TT_I32 -> I32
+ // TT_I32Tensor -> I32Tensor
+@@ -86,10 +94,10 @@ def TT_PtrLike : AnyTypeOf<[TT_Ptr, TT_PtrTensor]>;
+ 
+ // Tensor Type
+ def TT_FpIntTensor : RankedTensorOf<[TT_Float, TT_Int]>;
+-def TT_Tensor : RankedTensorOf<[TT_Float, TT_Int, TT_Ptr]>;
++def TT_Tensor : RankedTensorOf<[TT_Float, TT_Int, TT_Ptr, Index]>;
+ 
+ // Any Type in Triton IR
+-def TT_Type : AnyTypeOf<[TT_FloatLike, TT_IntLike, TT_PtrLike]>;
++def TT_Type : AnyTypeOf<[TT_FloatLike, TT_IntLike, TT_PtrLike, TT_IndexLike]>;
+ 
+ // Type constraint for any type implementing TensorDescInterface
+ def TT_AnyTensorDescType : Type<
+diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
+index 5bc8b16bce..0faf5422fc 100644
+--- a/lib/Dialect/Triton/IR/Ops.cpp
++++ b/lib/Dialect/Triton/IR/Ops.cpp
+@@ -1094,6 +1094,12 @@ LogicalResult BitcastOp::verify() {
+     dstType = dstTensorType.getElementType();
+   if (auto srcTensorType = dyn_cast<RankedTensorType>(srcType))
+     srcType = srcTensorType.getElementType();
++  if (srcType.isIndex() || dstType.isIndex()) {
++    if (srcType == dstType)
++      return success();
++    return emitError(
++        "Cannot bitcast index to a different type; use arith.index_cast");
++  }
+   bool dstIsPtr = isa<triton::PointerType>(dstType);
+   bool srcIsPtr = isa<triton::PointerType>(srcType);
+   if (dstIsPtr || srcIsPtr) {
+diff --git a/lib/Dialect/Triton/Transforms/Combine.cpp b/lib/Dialect/Triton/Transforms/Combine.cpp
+index acabba1be1..d9c66f3dfb 100644
+--- a/lib/Dialect/Triton/Transforms/Combine.cpp
++++ b/lib/Dialect/Triton/Transforms/Combine.cpp
+@@ -46,7 +46,9 @@ bool isAddPtrOffsetCombinable(Value first, Value second) {
+ 
+   if (first.getType() == second.getType()) {
+     // Whether bitwidth of element type is equal to pointer
+-    if (getElementTypeOrSelf(first.getType()).getIntOrFloatBitWidth() == 64)
++    // Index arithmetic uses the target's pointer-index width.
++    Type elementType = getElementTypeOrSelf(first.getType());
++    if (elementType.isIndex() || elementType.isInteger(64))
+       return true;
+ 
+     // first + second does not overflow
+diff --git a/test/Conversion/triton_to_tritongpu.mlir b/test/Conversion/triton_to_tritongpu.mlir
+index 84918529d5..5d26735aaf 100644
+--- a/test/Conversion/triton_to_tritongpu.mlir
++++ b/test/Conversion/triton_to_tritongpu.mlir
+@@ -225,3 +225,16 @@ tt.func @call_into_dot(%b: tensor<32x128xf16>) {
+   %0 = tt.dot %a, %b, %c : tensor<128x32xf16> * tensor<32x128xf16> -> tensor<128x128xf32>
+   tt.return
+ }
++
++// -----
++
++// Layout conversion must preserve index elements while assigning encodings.
++// CHECK-LABEL: @index_shape_layout
++// CHECK: ttg.convert_layout {{.*}} : tensor<2xindex,
++// CHECK: tt.expand_dims {{.*}} : tensor<2xindex, {{.*}}> -> tensor<2x1xindex,
++// CHECK: tt.broadcast {{.*}} : tensor<2x1xindex, {{.*}}> -> tensor<2x4xindex,
++tt.func @index_shape_layout(%indices: tensor<2xindex>) -> tensor<2x4xindex> {
++  %expanded = tt.expand_dims %indices {axis = 1 : i32} : tensor<2xindex> -> tensor<2x1xindex>
++  %broadcast = tt.broadcast %expanded : tensor<2x1xindex> -> tensor<2x4xindex>
++  tt.return %broadcast : tensor<2x4xindex>
++}
+diff --git a/test/Triton/canonicalize.mlir b/test/Triton/canonicalize.mlir
+index b747cc02e7..386ef39ebc 100644
+--- a/test/Triton/canonicalize.mlir
++++ b/test/Triton/canonicalize.mlir
+@@ -260,3 +260,31 @@ tt.func @no_canonicalize_indivisible_offset(%base: tensor<128x!tt.ptr<f32>>) ->
+   %result = tt.int_to_ptr %offset_ptr_int : tensor<128xi64> -> tensor<128x!tt.ptr<f32>>
+   tt.return %result : tensor<128x!tt.ptr<f32>>
+ }
++
++// -----
++
++// CHECK-LABEL: @index_addptr_zero
++// CHECK-SAME: %[[BASE:[a-zA-Z0-9_]+]]: !tt.ptr<i8>
++// CHECK-NOT: tt.addptr
++// CHECK: tt.return %[[BASE]] : !tt.ptr<i8>
++tt.func @index_addptr_zero(%base: !tt.ptr<i8>) -> !tt.ptr<i8> {
++  %zero = arith.constant 0 : index
++  %ptr = tt.addptr %base, %zero : !tt.ptr<i8>, index
++  tt.return %ptr : !tt.ptr<i8>
++}
++
++// -----
++
++// CHECK-LABEL: @index_shape_constant_fold
++// CHECK: %[[VALUE:.*]] = arith.constant dense<-7> : tensor<2x4xindex>
++// CHECK-NOT: tt.splat
++// CHECK-NOT: tt.expand_dims
++// CHECK-NOT: tt.broadcast
++// CHECK: tt.return %[[VALUE]] : tensor<2x4xindex>
++tt.func @index_shape_constant_fold() -> tensor<2x4xindex> {
++  %value = arith.constant -7 : index
++  %splat = tt.splat %value : index -> tensor<2xindex>
++  %expand = tt.expand_dims %splat {axis = 1 : i32} : tensor<2xindex> -> tensor<2x1xindex>
++  %broadcast = tt.broadcast %expand : tensor<2x1xindex> -> tensor<2x4xindex>
++  tt.return %broadcast : tensor<2x4xindex>
++}
+diff --git a/test/Triton/combine.mlir b/test/Triton/combine.mlir
+index a5e8ef905f..538f622bc1 100644
+--- a/test/Triton/combine.mlir
++++ b/test/Triton/combine.mlir
+@@ -542,3 +542,16 @@ tt.func @test_combine_broadcast_mul_reduce_higher_rank(%arg0: tensor<32x16x4xf32
+     }) : (tensor<32x16x32x4xf32>) -> tensor<32x32x4xf32>
+     tt.return %5 : tensor<32x32x4xf32>
+ }
++
++// -----
++
++// CHECK-LABEL: @combine_index_addptr
++// CHECK: %[[SUM:.*]] = arith.addi %arg1, %arg2 : index
++// CHECK: %[[PTR:.*]] = tt.addptr %arg0, %[[SUM]] : !tt.ptr<i8>, index
++// CHECK-NOT: tt.addptr
++// CHECK: tt.return %[[PTR]] : !tt.ptr<i8>
++tt.func @combine_index_addptr(%base: !tt.ptr<i8>, %x: index, %y: index) -> !tt.ptr<i8> {
++  %first = tt.addptr %base, %x : !tt.ptr<i8>, index
++  %second = tt.addptr %first, %y : !tt.ptr<i8>, index
++  tt.return %second : !tt.ptr<i8>
++}
+diff --git a/test/Triton/invalid.mlir b/test/Triton/invalid.mlir
+index 43ea857e1e..5eb6c0a22e 100644
+--- a/test/Triton/invalid.mlir
++++ b/test/Triton/invalid.mlir
+@@ -657,3 +657,12 @@ module attributes {"ttg.num-warps" = 4 : i32, "ttg.threads-per-warp" = 32 : i32,
+     tt.return
+   }
+ }
++
++// -----
++
++// Index width is target-dependent. Bitcast does not perform an index cast.
++tt.func @index_bitcast_requires_explicit_cast(%value: index) {
++  // expected-error @+1 {{Cannot bitcast index to a different type; use arith.index_cast}}
++  %cast = tt.bitcast %value : index -> i64
++  tt.return
++}
+diff --git a/test/Triton/ops.mlir b/test/Triton/ops.mlir
+index e026c6b040..6ffc9e2174 100644
+--- a/test/Triton/ops.mlir
++++ b/test/Triton/ops.mlir
+@@ -285,3 +285,36 @@ tt.func @unsplat(%arg0: tensor<1x1xf32>) -> f32 {
+   %0 = tt.unsplat %arg0 : tensor<1x1xf32>
+   tt.return %0 : f32
+ }
++
++// Index displacements are signed element offsets. Shape operations preserve
++// index values without introducing an integer cast.
++// CHECK-LABEL: @index_pointer_and_shape_ops
++// CHECK-SAME: %[[BASE:[a-zA-Z0-9_]+]]: !tt.ptr<f32>, %[[X:[a-zA-Z0-9_]+]]: index, %[[OFFSETS:[a-zA-Z0-9_]+]]: tensor<2xindex>
++tt.func @index_pointer_and_shape_ops(%base: !tt.ptr<f32>, %x: index, %offsets: tensor<2xindex>) -> (!tt.ptr<f32>, tensor<2x4x!tt.ptr<f32>>) {
++  // CHECK: %[[SCALAR:.*]] = tt.addptr %[[BASE]], %[[X]] : !tt.ptr<f32>, index
++  %scalar = tt.addptr %base, %x : !tt.ptr<f32>, index
++  // CHECK: %[[EXPAND:.*]] = tt.expand_dims %[[OFFSETS]] {axis = 1 : i32} : tensor<2xindex> -> tensor<2x1xindex>
++  %expand = tt.expand_dims %offsets {axis = 1 : i32} : tensor<2xindex> -> tensor<2x1xindex>
++  // CHECK: %[[BROADCAST:.*]] = tt.broadcast %[[EXPAND]] : tensor<2x1xindex> -> tensor<2x4xindex>
++  %broadcast = tt.broadcast %expand : tensor<2x1xindex> -> tensor<2x4xindex>
++  // CHECK: tt.splat %[[X]] : index -> tensor<2x4xindex>
++  %splat = tt.splat %x : index -> tensor<2x4xindex>
++  %sum = arith.addi %broadcast, %splat : tensor<2x4xindex>
++  %bases = tt.splat %base : !tt.ptr<f32> -> tensor<2x4x!tt.ptr<f32>>
++  // CHECK: tt.addptr {{.*}} : tensor<2x4x!tt.ptr<f32>>, tensor<2x4xindex>
++  %ptrs = tt.addptr %bases, %sum : tensor<2x4x!tt.ptr<f32>>, tensor<2x4xindex>
++  tt.return %scalar, %ptrs : !tt.ptr<f32>, tensor<2x4x!tt.ptr<f32>>
++}
++
++// Exercise scalar extraction, reshape, and transpose on index values.
++// CHECK-LABEL: @index_common_types
++tt.func @index_common_types(%value: index, %values: tensor<2x2xindex>) -> (index, tensor<4xindex>, tensor<2x2xindex>) {
++  %splat = tt.splat %value : index -> tensor<1xindex>
++  // CHECK: tt.unsplat {{.*}} : tensor<1xindex>
++  %scalar = tt.unsplat %splat : tensor<1xindex>
++  // CHECK: tt.reshape {{.*}} : tensor<2x2xindex> -> tensor<4xindex>
++  %flat = tt.reshape %values : tensor<2x2xindex> -> tensor<4xindex>
++  // CHECK: tt.trans {{.*}} {order = array<i32: 1, 0>} : tensor<2x2xindex> -> tensor<2x2xindex>
++  %transposed = tt.trans %values {order = array<i32: 1, 0>} : tensor<2x2xindex> -> tensor<2x2xindex>
++  tt.return %scalar, %flat, %transposed : index, tensor<4xindex>, tensor<2x2xindex>
++}
