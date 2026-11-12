@@ -1,8 +1,8 @@
 diff --git a/include/triton/Dialect/Triton/IR/TritonOps.td b/include/triton/Dialect/Triton/IR/TritonOps.td
-index 8a9c7e155e..559baca4c7 100644
+index 8a9c7e155e..51a2cabf7c 100644
 --- a/include/triton/Dialect/Triton/IR/TritonOps.td
 +++ b/include/triton/Dialect/Triton/IR/TritonOps.td
-@@ -724,6 +724,21 @@ class TT_DevThreadQueryOp<string mnemonic, string what>
+@@ -724,6 +724,23 @@ class TT_DevThreadQueryOp<string mnemonic, string what>
      let assemblyFormat = "attr-dict `:` type($result)";
  }
  
@@ -14,21 +14,23 @@ index 8a9c7e155e..559baca4c7 100644
 +      index, in [0, num_warps), of the warp that runs the current iteration.
 +      A warp runs one iteration at a time and finishes it before it is given
 +      another, so warp-indexed resources (per-warp scratch, the warp's
-+      scratchpad share) are private to the iteration while it runs.
++      scratchpad share) are private to the iteration while it runs. The
++      frontend only accepts it inside a tl.dev.parallel loop; a pass may
++      later fold a one-iteration loop away, which leaves it outside, where
++      the single warp running the code is warp 0.
 +    }];
 +    let results = (outs I32:$result);
 +    let assemblyFormat = "attr-dict `:` type($result)";
-+    let hasVerifier = 1;
 +}
 +
  def TT_DevCurrentCpuOp : TT_DevThreadQueryOp<"dev.current_cpu", "CPU">;
  def TT_DevOsThreadIdOp
      : TT_DevThreadQueryOp<"dev.os_thread_id", "operating system thread id">;
 diff --git a/lib/Dialect/Triton/IR/Ops.cpp b/lib/Dialect/Triton/IR/Ops.cpp
-index 2b5ea7b12c..dc9d799045 100644
+index 2b5ea7b12c..c6f7295a90 100644
 --- a/lib/Dialect/Triton/IR/Ops.cpp
 +++ b/lib/Dialect/Triton/IR/Ops.cpp
-@@ -242,6 +242,20 @@ LogicalResult DevSchedBarrierOp::verify() {
+@@ -242,6 +242,14 @@ LogicalResult DevSchedBarrierOp::verify() {
    return success();
  }
  
@@ -38,12 +40,6 @@ index 2b5ea7b12c..dc9d799045 100644
 +        &effects) {
 +  effects.emplace_back(MemoryEffects::Write::get(),
 +                       ThreadIdentityResource::get());
-+}
-+
-+LogicalResult DevWarpIdOp::verify() {
-+  if (!(*this)->getParentOfType<scf::ForallOp>())
-+    return emitOpError("is only valid inside a tl.dev.parallel loop");
-+  return success();
 +}
 +
  //-- DevCurrentCpuOp / DevOsThreadIdOp --
@@ -64,6 +60,25 @@ index 13908d7822..e98d2cb883 100644
        .def("create_dev_current_cpu",
             [](TritonOpBuilder &self) -> Value {
               return self.create<DevCurrentCpuOp>(
+diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
+index 0f81cb9668..cfe68a4a80 100644
+--- a/python/triton/compiler/code_generator.py
++++ b/python/triton/compiler/code_generator.py
+@@ -1365,6 +1365,14 @@ class CodeGenerator(ast.NodeVisitor):
+         iv_placeholder = self.builder.create_poison(iv_ir_type)
+         self.set_value(node.target.id, language.core.tensor(iv_placeholder, iv_type))
+ 
++        # tl.dev.warp_id checks it, including in the dry run of _find_carries.
++        self.builder.dev_parallel_depth = getattr(self.builder, "dev_parallel_depth", 0) + 1
++        try:
++            self._parallel_for_region(node, lb, ub, step, iv_ir_type, iv_type, iv_placeholder)
++        finally:
++            self.builder.dev_parallel_depth -= 1
++
++    def _parallel_for_region(self, node, lb, ub, step, iv_ir_type, iv_type, iv_placeholder):
+         with enter_sub_region(self) as sr:
+             liveins, _ = sr
+             ip, last_loc = self._get_insertion_point_and_loc()
 diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
 index 81528e8d5f..d66105d673 100644
 --- a/python/triton/language/dev.py
@@ -132,14 +147,16 @@ index 81528e8d5f..d66105d673 100644
  
  
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index ce89769b50..07eaa711a0 100644
+index ce89769b50..8d9bfa68b3 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
-@@ -84,6 +84,9 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -84,6 +84,11 @@ class TritonSemantic(Generic[TensorTy]):
          wrapped = tuple(self.tensor(value, tensor.type) for value, tensor in zip(results, tensors))
          return wrapped[0] if len(wrapped) == 1 else wrapped
  
 +    def dev_warp_id(self) -> TensorTy:
++        if not getattr(self.builder, "dev_parallel_depth", 0):
++            raise ValueError("tl.dev.warp_id is only valid inside a tl.dev.parallel loop")
 +        return self.tensor(self.builder.create_dev_warp_id(), tl.int32)
 +
      def dev_current_cpu(self) -> TensorTy:

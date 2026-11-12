@@ -398,3 +398,13 @@ def test_warp_id(device, num_warps):
             # The warp is the position of the CPU in the slot, one OS thread each.
             assert slot[w] == c
             assert t == ts[ws.index(w)]
+
+
+@triton.jit
+def _warp_outside_kernel(out_ptr):
+    tl.store(out_ptr, tl.dev.warp_id())
+
+
+def test_warp_id_outside_parallel(device):
+    with pytest.raises(Exception, match="only valid inside a tl.dev.parallel loop"):
+        _warp_outside_kernel[(1,)](torch.empty(1, dtype=torch.int32))

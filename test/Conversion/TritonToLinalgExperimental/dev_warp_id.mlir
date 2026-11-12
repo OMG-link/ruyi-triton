@@ -1,7 +1,7 @@
-// RUN: triton-shared-opt --split-input-file --verify-diagnostics --triton-to-linalg-experimental=structured-ldst-mode=tensor-first-vector-cpu %s | FileCheck %s
+// RUN: triton-shared-opt --triton-to-linalg-experimental=structured-ldst-mode=tensor-first-vector-cpu %s | FileCheck %s
 //
 // tt.dev.warp_id becomes a call of the CPU runtime's tcrt_warp_id, inside
-// the parallel loop; outside of one it is rejected.
+// the parallel loop.
 
 // CHECK: func.func private @tcrt_warp_id() -> i32
 // CHECK-LABEL: func.func @warp_id
@@ -19,17 +19,6 @@ module {
       %p = tt.addptr %out, %i : !tt.ptr<i32>, i32
       tt.store %p, %w : !tt.ptr<i32>
     }
-    tt.return
-  }
-}
-
-// -----
-
-module {
-  tt.func public @outside(%out: !tt.ptr<i32>) {
-    // expected-error @+1 {{is only valid inside a tl.dev.parallel loop}}
-    %w = tt.dev.warp_id : i32
-    tt.store %out, %w : !tt.ptr<i32>
     tt.return
   }
 }
