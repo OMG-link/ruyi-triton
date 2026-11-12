@@ -21,10 +21,15 @@ def kernel(x_ptr, out_ptr, sum_ptr, N: tl.constexpr, BLOCK: tl.constexpr):
 kernel[(grid,)](x, out, sums, N=4096, BLOCK=128, num_warps=4)
 ```
 
-* `tl.dev.parallel(start, end, step)` is used like `tl.range`. Its
-  iterations are independent; thread `t` of the instance runs iterations
-  `t, t + W, t + 2W, ...`, and the code after the loop starts when all
-  threads are done (fork/join). Code outside such loops runs on one thread.
+* `tl.dev.parallel(start, end, step, schedule="static")` is used like
+  `tl.range`. Its iterations are independent, and the code after the loop
+  starts when all threads are done (fork/join). `schedule` hands the n
+  iterations to the W threads: `"static"` (the default, as OpenMP's
+  `schedule(static)`) gives thread `t` one contiguous range, the first
+  `n % W` threads one iteration more; `"round-robin"` gives it iterations
+  `t, t + W, t + 2W, ...`. It becomes the forall's `cpar.schedule` attribute,
+  which `--cpar-distribute-loops` reads. Code outside such loops runs on one
+  thread.
 * Values defined before the loop (pointers, scalars) are shared by the
   threads. Tensors created in the body belong to the iteration.
 * `tl.dev.alloc` sits directly in the kernel body, so its buffers are

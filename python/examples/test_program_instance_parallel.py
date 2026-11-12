@@ -304,11 +304,14 @@ def test_thread_queries(device):
         # All iterations of an instance ran on the CPUs of one slot.
         slot = next(s for s in slots if row_cpus[0] in s)
         assert set(row_cpus) <= set(slot)
-        # Iteration i runs on thread i % W, which shares an OS thread with
-        # i % width when the slot is smaller than W.
+        # Iteration i runs on its static-schedule thread, which shares an OS
+        # thread with others when the slot is smaller than W.
+        q, r = divmod(n, warps)
+        owner = [t for t in range(warps) for _ in range(q + (t < r))]
+        first = {owner[i] % width: i for i in reversed(range(n))}
         for i in range(n):
-            assert row_tids[i] == row_tids[i % warps % width]
-            assert row_cpus[i] == row_cpus[i % warps % width]
+            assert row_tids[i] == row_tids[first[owner[i] % width]]
+            assert row_cpus[i] == row_cpus[first[owner[i] % width]]
         assert len(set(row_tids)) == min(width, warps)
         # The code after the loop runs on the thread of logical id 0.
         assert serial[p].tolist() == [row_cpus[0], row_tids[0]]
@@ -408,3 +411,37 @@ def _warp_outside_kernel(out_ptr):
 def test_warp_id_outside_parallel(device):
     with pytest.raises(Exception, match="only valid inside a tl.dev.parallel loop"):
         _warp_outside_kernel[(1,)](torch.empty(1, dtype=torch.int32))
+
+
+# --------------------------------------------------------------------------
+# tl.dev.parallel(schedule=...)
+# --------------------------------------------------------------------------
+
+
+@triton.jit
+def _schedule_kernel(warp_ptr, N: tl.constexpr, SCHEDULE: tl.constexpr):
+    for i in tl.dev.parallel(0, N, schedule=SCHEDULE):
+        tl.store(warp_ptr + i, tl.dev.warp_id())
+
+
+@pytest.mark.parametrize("schedule", ["static", "round-robin"])
+@pytest.mark.parametrize("num_warps", [3, 4])
+def test_schedule(device, schedule, num_warps):
+    from triton.backends.triton_shared import cpu_runtime
+
+    n = 22
+    warp = torch.full((n,), -1, dtype=torch.int32)
+    _schedule_kernel[(1,)](warp, N=n, SCHEDULE=schedule, num_warps=num_warps)
+    # A slot narrower than num_warps folds logical threads onto its warps.
+    width = len(cpu_runtime.slot_cpus(num_warps, 0))
+    if schedule == "static":
+        q, r = divmod(n, num_warps)
+        owner = [t for t in range(num_warps) for _ in range(q + (t < r))]
+    else:
+        owner = [i % num_warps for i in range(n)]
+    assert warp.tolist() == [t % width for t in owner]
+
+
+def test_schedule_rejects_unknown(device):
+    with pytest.raises(Exception, match="schedule must be one of"):
+        _schedule_kernel[(1,)](torch.empty(4, dtype=torch.int32), N=4, SCHEDULE="dynamic")

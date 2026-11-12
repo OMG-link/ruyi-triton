@@ -1,0 +1,55 @@
+diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
+index cfe68a4a80..433eec42c0 100644
+--- a/python/triton/compiler/code_generator.py
++++ b/python/triton/compiler/code_generator.py
+@@ -1368,11 +1368,11 @@ class CodeGenerator(ast.NodeVisitor):
+         # tl.dev.warp_id checks it, including in the dry run of _find_carries.
+         self.builder.dev_parallel_depth = getattr(self.builder, "dev_parallel_depth", 0) + 1
+         try:
+-            self._parallel_for_region(node, lb, ub, step, iv_ir_type, iv_type, iv_placeholder)
++            self._parallel_for_region(node, iterator, lb, ub, step, iv_ir_type, iv_type, iv_placeholder)
+         finally:
+             self.builder.dev_parallel_depth -= 1
+ 
+-    def _parallel_for_region(self, node, lb, ub, step, iv_ir_type, iv_type, iv_placeholder):
++    def _parallel_for_region(self, node, iterator, lb, ub, step, iv_ir_type, iv_type, iv_placeholder):
+         with enter_sub_region(self) as sr:
+             liveins, _ = sr
+             ip, last_loc = self._get_insertion_point_and_loc()
+@@ -1383,6 +1383,8 @@ class CodeGenerator(ast.NodeVisitor):
+                     f"must not assign to {', '.join(names)}, defined before the loop")
+             self._set_insertion_point_and_loc(ip, last_loc)
+             forall_op = self.builder.create_forall_op(lb, ub, step)
++            if iterator.schedule != "static":
++                forall_op.set_attr("cpar.schedule", self.builder.get_string_attr(iterator.schedule))
+             body = forall_op.get_forall_body()
+             self.scf_stack.append(node)
+             self.builder.set_insertion_point_to_start(body)
+diff --git a/python/triton/language/dev.py b/python/triton/language/dev.py
+index d66105d673..eeaafcd0d3 100644
+--- a/python/triton/language/dev.py
++++ b/python/triton/language/dev.py
+@@ -98,9 +98,22 @@ class parallel(base_value):
+     :param arg1: the start value, or the end value if ``arg2`` is not given.
+     :param arg2: the end value.
+     :param step: the step value, a positive integer.
++    :param schedule: how the iterations are handed to the threads:
++        ``"static"`` (the default, as OpenMP's ``schedule(static)``: each
++        thread one contiguous range, the first ``n % num_warps`` threads one
++        iteration more) or ``"round-robin"`` (thread ``t`` runs iterations
++        ``t, t + num_warps, ...``). Use :code:`tl.dev.warp_id()`, not the
++        iteration, to index per-warp resources under either.
+     """
+ 
+-    def __init__(self, arg1, arg2=None, step=None):
++    SCHEDULES = ("static", "round-robin")
++
++    def __init__(self, arg1, arg2=None, step=None, schedule="static"):
++        schedule = _unwrap_if_constexpr(schedule)
++        if schedule not in self.SCHEDULES:
++            raise ValueError(f"tl.dev.parallel schedule must be one of {self.SCHEDULES}, "
++                             f"got {schedule!r}")
++        self.schedule = schedule
+         self.step = constexpr(1) if step is None else step
+         if arg2 is None:
+             self.start = constexpr(0)
