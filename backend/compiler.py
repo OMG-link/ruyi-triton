@@ -197,6 +197,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                 # memrefs. Insert and lower their deallocations while the
                 # memref-level ownership information is still available.
                 "--buffer-deallocation-pipeline",
+                *_sched_barrier_args(options),
                 # The thread foralls become cpar.parallel regions.
                 "--cpar-forall-to-parallel",
                 # Lower linalg.matmul (memref) → ime.vfmadot / ime.vmadot
@@ -310,6 +311,7 @@ def _ttsharedir_to_llir(ttsharedir: str, options=None):
                     "--empty-tensor-to-alloc-tensor",
                     "--one-shot-bufferize=allow-return-allocs-from-loops=true",
                     "--buffer-deallocation-pipeline",
+                    *_sched_barrier_args(options),
                     "--cpar-forall-to-parallel",
                     "--eliminate-memref-copy",
                     # Triton programs commonly materialize small, statically
@@ -607,8 +609,7 @@ def _tile_to_vector_args(options, ime=False) -> list:
     their operands are loads a masked full-K tile can be read from;
     `--promote-ime-tile-k` widens those to the tile's K, and
     `--lower-vector-contract-to-ime-tile` turns all of them into vmadot or
-    vfwmadot tile dots that its `--lower-ime` lowers. `--lower-cpu-sched-barrier` lowers `cpu.sched_barrier` to inline asm that
-    holds its values in registers.
+    vfwmadot tile dots that its `--lower-ime` lowers.
     TRITON_RISCV_REMARKS=<regex> prints the optimization remarks whose
     category matches, e.g. `tile-to-vector`; remarks are silent otherwise.
     """
@@ -623,7 +624,6 @@ def _tile_to_vector_args(options, ime=False) -> list:
             "--canonicalize",
             "--lower-vector-contract-to-ime-tile",
             "--flatten-vector-tiles",
-            "--lower-cpu-sched-barrier",
             "--canonicalize",
             "--cse",
         ]
@@ -632,10 +632,20 @@ def _tile_to_vector_args(options, ime=False) -> list:
         "--canonicalize",
         "--cse",
         "--flatten-vector-tiles",
-        "--lower-cpu-sched-barrier",
         "--canonicalize",
         "--cse",
     ]
+
+
+def _sched_barrier_args(options) -> list:
+    """Lower `cpu.sched_barrier` once the function is bufferized.
+
+    On RISC-V the barrier becomes `llvm.riscv.sched.barrier`, an LLVM
+    intrinsic call that One-Shot Bufferize rejects for its unknown memory
+    effects, so the lowering runs after bufferization; on x86 it becomes an
+    empty inline asm. Either form holds its values in registers.
+    """
+    return [] if _target(options) is None else ["--lower-cpu-sched-barrier"]
 
 
 def _remarks_args() -> list:

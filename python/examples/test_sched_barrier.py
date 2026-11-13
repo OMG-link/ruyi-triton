@@ -82,13 +82,19 @@ def test_sched_barrier_multiple_tensors(device):
 
 
 @pytest.mark.parametrize("memory", [False, True])
-def test_sched_barrier_emits_sideeffect_asm(device, memory):
+def test_sched_barrier_lowering_in_llir(device, memory):
     x = torch.randn(N, device=device)
     out = torch.empty_like(x)
     compiled = _single_barrier_kernel.warmup(x, out, MEMORY=memory, N=N, grid=(1,))
     llir = compiled.asm["llir"]
-    assert "asm sideeffect" in llir
-    assert ("~{memory}" in llir) is memory
+    # RISC-V holds the values with llvm.riscv.sched.barrier (.mem orders
+    # memory too); other targets with an empty side-effecting inline asm.
+    if "llvm.riscv.sched.barrier" in llir:
+        assert "asm sideeffect" not in llir
+        assert ("llvm.riscv.sched.barrier.mem" in llir) is memory
+    else:
+        assert "asm sideeffect" in llir
+        assert ("~{memory}" in llir) is memory
 
 
 @pytest.mark.parametrize(
@@ -167,4 +173,6 @@ def test_sched_barrier_riscv_cross_compile_warmup(tmp_path):
         [get_llvm_bin_path("llvm-readelf"), "-h", str(obj_path)], text=True
     )
     assert "Machine:                           RISC-V" in header
-    assert "asm sideeffect" in llir_path.read_text()
+    llir = llir_path.read_text()
+    assert "llvm.riscv.sched.barrier" in llir
+    assert "asm sideeffect" not in llir
